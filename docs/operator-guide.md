@@ -25,8 +25,8 @@ A new credential file is created by the first invite:
 
 ```sh
 INVITE=$(./bin/tearenvd invite \
-  -users /var/lib/tearenv/users.json \
-  -identity alice)
+  --users /var/lib/tearenv/users.json \
+  --identity alice)
 ```
 
 `tearenvd serve` won't start with a missing or empty credential file. The identity must match `^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$`.
@@ -41,16 +41,16 @@ Grant an identity before or after it redeems the invite:
 
 ```sh
 ./bin/tearenvd service grant \
-  -users /var/lib/tearenv/users.json \
-  -identity alice \
-  -name grpc \
-  -target api-alice.dev-alice.svc.cluster.local:50051 \
-  -local-port 50051
+  --users /var/lib/tearenv/users.json \
+  --identity alice \
+  --name grpc \
+  --target api-alice.dev-alice.svc.cluster.local:50051 \
+  --local-port 50051
 ```
 
 A static service is expected to be running. `tearenvd` dials it once for each developer connection and returns a generic unavailable error if that dial fails.
 
-The alias must match `^[a-z][a-z0-9-]{0,31}$`. The target must be a reachable `host:port` from the gateway. When `-local-port` is omitted, it defaults to the target port.
+The alias must match `^[a-z][a-z0-9-]{0,31}$`. The target must be a reachable `host:port` from the gateway. When `--local-port` is omitted, it defaults to the target port.
 
 Grants are identity-bound and keyed by alias. Running the command again with the same identity and alias replaces that grant. The running gateway reloads grants when a client requests the catalog or opens a service, so a restart isn't required.
 
@@ -60,9 +60,9 @@ Run:
 
 ```sh
 ./bin/tearenvd serve \
-  -listen :2222 \
-  -users /var/lib/tearenv/users.json \
-  -host-key /var/lib/tearenv/ssh_host_ed25519_key
+  --listen :2222 \
+  --users /var/lib/tearenv/users.json \
+  --host-key /var/lib/tearenv/ssh_host_ed25519_key
 ```
 
 If the host key doesn't exist, `tearenvd` creates a persistent Ed25519 private key with mode `0600`. Back it up and mount it persistently. Replacing the key triggers host-key warnings for every existing client and must be communicated as a deliberate rotation.
@@ -88,36 +88,36 @@ Run the pod with `serviceAccountName: tearenvd` and start the daemon with:
 
 ```sh
 tearenvd serve \
-  -listen :2222 \
-  -users /var/lib/tearenv/users.json \
-  -host-key /var/lib/tearenv/ssh_host_ed25519_key \
-  -scaler kubernetes
+  --listen :2222 \
+  --users /var/lib/tearenv/users.json \
+  --host-key /var/lib/tearenv/ssh_host_ed25519_key \
+  --scaler kubernetes
 ```
 
-The deprecated `-kubernetes` flag is equivalent to `-scaler kubernetes`. Don't set it together with a different scaler value.
+The deprecated `--kubernetes` flag is equivalent to `--scaler kubernetes`. Don't set it together with a different scaler value.
 
 Grant a managed StatefulSet:
 
 ```sh
 tearenvd service grant \
-  -users /var/lib/tearenv/users.json \
-  -identity alice \
-  -name postgres \
-  -target postgres.dev-alice.svc.cluster.local:5432 \
-  -local-port 5432 \
-  -workload-kind statefulset \
-  -workload-namespace dev-alice \
-  -workload-name postgres \
-  -replicas 1 \
-  -ready-timeout 2m \
-  -idle-timeout 10m
+  --users /var/lib/tearenv/users.json \
+  --identity alice \
+  --name postgres \
+  --target postgres.dev-alice.svc.cluster.local:5432 \
+  --local-port 5432 \
+  --workload-kind statefulset \
+  --workload-namespace dev-alice \
+  --workload-name postgres \
+  --replicas 1 \
+  --ready-timeout 2m \
+  --idle-timeout 10m
 ```
 
 The namespace and workload name identify the scale subresource. The target remains the network endpoint that must accept TCP. tearenv doesn't inspect Kubernetes readiness conditions; after scaling, it attempts a one-second TCP dial every 500 milliseconds until `ready-timeout`.
 
 If multiple aliases belong to the same workload, give them the same workload kind, namespace, and name. tearenvd then shares active connection tracking and won't downscale until all aliases are idle.
 
-Static grants can coexist with scaled grants. Starting without `-scaler` keeps static services working, but every grant with workload metadata fails when a developer tries to connect.
+Static grants can coexist with scaled grants. Starting without `--scaler` keeps static services working, but every grant with workload metadata fails when a developer tries to connect.
 
 ## Use writable persistent state in Kubernetes
 

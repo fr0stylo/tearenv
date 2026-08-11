@@ -32,7 +32,7 @@ func TestBinariesAuthenticateIdentityAndForwardTraffic(t *testing.T) {
 
 	credentialsPath := filepath.Join(temporary, "users.json")
 	inviteOutput, err := runCommand(root, nil, serverBinary,
-		"invite", "-users", credentialsPath, "-identity", "alice",
+		"invite", "--users", credentialsPath, "--identity", "alice",
 	)
 	if err != nil {
 		t.Fatalf("create invite: %v\n%s", err, inviteOutput)
@@ -41,8 +41,8 @@ func TestBinariesAuthenticateIdentityAndForwardTraffic(t *testing.T) {
 
 	target := startEchoServer(t)
 	grantOutput, err := runCommand(root, nil, serverBinary,
-		"service", "grant", "-users", credentialsPath,
-		"-identity", "alice", "-name", "redis", "-target", target, "-local-port", "6379",
+		"service", "grant", "--users", credentialsPath,
+		"--identity", "alice", "--name", "redis", "--target", target, "--local-port", "6379",
 	)
 	if err != nil {
 		t.Fatalf("grant service: %v\n%s", err, grantOutput)
@@ -63,9 +63,9 @@ func TestBinariesAuthenticateIdentityAndForwardTraffic(t *testing.T) {
 	serverProcess := startProcess(t, root, filepath.Join(temporary, "server.log"),
 		serverBinary,
 		"serve",
-		"-listen", sshAddress,
-		"-host-key", hostKeyPath,
-		"-users", credentialsPath,
+		"--listen", sshAddress,
+		"--host-key", hostKeyPath,
+		"--users", credentialsPath,
 	)
 	t.Cleanup(func() { serverProcess.stop(t) })
 	waitForLog(t, serverProcess.logPath, "tearenvd ready")
@@ -73,10 +73,10 @@ func TestBinariesAuthenticateIdentityAndForwardTraffic(t *testing.T) {
 	profilePath := filepath.Join(temporary, "client-profile.json")
 	loginOutput, err := runCommand(root, []string{"TEARENV_INVITE=" + invite}, clientBinary,
 		"login",
-		"-identity", "alice",
-		"-server", sshAddress,
-		"-config", profilePath,
-		"-known-hosts", knownHostsPath,
+		"--identity", "alice",
+		"--server", sshAddress,
+		"--config", profilePath,
+		"--known-hosts", knownHostsPath,
 	)
 	if err != nil {
 		t.Fatalf("login: %v\n%s", err, loginOutput)
@@ -87,7 +87,7 @@ func TestBinariesAuthenticateIdentityAndForwardTraffic(t *testing.T) {
 	clientProcess := startProcess(t, root, filepath.Join(temporary, "client.log"),
 		clientBinary,
 		"connect",
-		"-config", profilePath,
+		"--config", profilePath,
 		"redis="+localAddress,
 	)
 	t.Cleanup(func() { clientProcess.stop(t) })
@@ -99,10 +99,10 @@ func TestBinariesAuthenticateIdentityAndForwardTraffic(t *testing.T) {
 
 	reusedOutput, reusedErr := runCommand(root, []string{"TEARENV_INVITE=" + invite}, clientBinary,
 		"login",
-		"-identity", "alice",
-		"-server", sshAddress,
-		"-config", filepath.Join(temporary, "reused-profile.json"),
-		"-known-hosts", knownHostsPath,
+		"--identity", "alice",
+		"--server", sshAddress,
+		"--config", filepath.Join(temporary, "reused-profile.json"),
+		"--known-hosts", knownHostsPath,
 	)
 	if reusedErr == nil {
 		t.Fatalf("one-time invite was reused\n%s", reusedOutput)
@@ -111,8 +111,8 @@ func TestBinariesAuthenticateIdentityAndForwardTraffic(t *testing.T) {
 	rejected := startProcess(t, root, filepath.Join(temporary, "rejected.log"),
 		clientBinary,
 		"connect",
-		"-config", profilePath,
-		"-identity", "bob",
+		"--config", profilePath,
+		"--identity", "bob",
 		"redis="+reserveAddress(t),
 	)
 	select {

@@ -21,15 +21,15 @@ Create the one-time invite before starting the gateway. `tearenvd serve` expects
 
 ```sh
 INVITE=$(./bin/tearenvd invite \
-  -users /tmp/tearenv-demo/users.json \
-  -identity alice)
+  --users /tmp/tearenv-demo/users.json \
+  --identity alice)
 
 ./bin/tearenvd service grant \
-  -users /tmp/tearenv-demo/users.json \
-  -identity alice \
-  -name web \
-  -target 127.0.0.1:8080 \
-  -local-port 18080
+  --users /tmp/tearenv-demo/users.json \
+  --identity alice \
+  --name web \
+  --target 127.0.0.1:8080 \
+  --local-port 18080
 ```
 
 The invite is printed only once. Keep this terminal open for the login step.
@@ -46,9 +46,9 @@ In a third terminal, start the gateway:
 
 ```sh
 ./bin/tearenvd serve \
-  -listen 127.0.0.1:2222 \
-  -users /tmp/tearenv-demo/users.json \
-  -host-key /tmp/tearenv-demo/ssh_host_ed25519_key
+  --listen 127.0.0.1:2222 \
+  --users /tmp/tearenv-demo/users.json \
+  --host-key /tmp/tearenv-demo/ssh_host_ed25519_key
 ```
 
 The gateway creates and then reuses the host key. Its startup log includes the SHA256 fingerprint.
@@ -71,11 +71,11 @@ After the fingerprints match, redeem the invite:
 
 ```sh
 ./bin/tearenv login \
-  -config /tmp/tearenv-demo/profile.json \
-  -known-hosts /tmp/tearenv-demo/known_hosts \
-  -server 127.0.0.1:2222 \
-  -identity alice \
-  -invite "$INVITE"
+  --config /tmp/tearenv-demo/profile.json \
+  --known-hosts /tmp/tearenv-demo/known_hosts \
+  --server 127.0.0.1:2222 \
+  --identity alice \
+  --invite "$INVITE"
 ```
 
 The invite is now consumed. The client profile contains a new personal token and is saved with mode `0600`.
@@ -85,7 +85,7 @@ The invite is now consumed. The client profile contains a new personal token and
 Check the catalog:
 
 ```sh
-./bin/tearenv services -config /tmp/tearenv-demo/profile.json
+./bin/tearenv services --config /tmp/tearenv-demo/profile.json
 ```
 
 The output should be:
@@ -97,7 +97,7 @@ web	127.0.0.1:18080
 Start the local listener and leave it running:
 
 ```sh
-./bin/tearenv connect -config /tmp/tearenv-demo/profile.json
+./bin/tearenv connect --config /tmp/tearenv-demo/profile.json
 ```
 
 From another terminal, send a request through the tunnel:

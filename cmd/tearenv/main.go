@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -19,109 +19,200 @@ import (
 	"github.com/fr0stylo/tearenv/internal/client"
 	"github.com/fr0stylo/tearenv/internal/profile"
 	"github.com/fr0stylo/tearenv/internal/protocol"
+	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
+type loginOptions struct {
+	serverAddress  string
+	identity       string
+	invite         string
+	profilePath    string
+	knownHostsPath string
+	insecure       bool
+}
+
+type connectOptions struct {
+	profilePath    string
+	listenHost     string
+	serverAddress  string
+	identity       string
+	token          string
+	knownHostsPath string
+	insecure       bool
+}
+
+type servicesOptions struct {
+	profilePath string
+}
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return
-		}
 		slog.Error("tearenv stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
 func run(arguments []string) error {
-	if len(arguments) == 0 {
-		printUsage()
-		return errors.New("a command is required")
-	}
-	switch arguments[0] {
-	case "login":
-		return login(arguments[1:])
-	case "connect":
-		return connect(arguments[1:])
-	case "services":
-		return services(arguments[1:])
-	case "help", "-h", "--help":
-		printUsage()
-		return nil
-	default:
-		printUsage()
-		return fmt.Errorf("unknown command %q", arguments[0])
-	}
+	command := newRootCommand()
+	command.SetArgs(arguments)
+	return command.Execute()
 }
 
-func login(arguments []string) error {
-	flags := flag.NewFlagSet("tearenv login", flag.ContinueOnError)
-	serverAddress := flags.String("server", client.DefaultServerAddress, "SSH tunnel server")
-	identity := flags.String("identity", defaultIdentity(), "developer identity from the invite")
-	invite := flags.String("invite", os.Getenv("TEARENV_INVITE"), "one-time invite (or TEARENV_INVITE)")
-	profilePath := flags.String("config", defaultProfilePath(), "local profile destination")
-	knownHostsPath := flags.String("known-hosts", defaultKnownHostsPath(), "SSH known_hosts file")
-	insecure := flags.Bool("insecure-skip-host-key-check", false, "disable host identity verification (development only)")
-	if err := flags.Parse(arguments); err != nil {
-		return err
+func newRootCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:           "tearenv",
+		Short:         "Expose identity-authorized remote services on localhost",
+		SilenceErrors: true,
 	}
-	hostKey, err := hostKeyCallback(*knownHostsPath, *insecure)
+	command.AddCommand(
+		newLoginCommand(),
+		newServicesCommand(),
+		newConnectCommand(),
+	)
+	return command
+}
+
+func newLoginCommand() *cobra.Command {
+	options := loginOptions{
+		serverAddress:  client.DefaultServerAddress,
+		identity:       defaultIdentity(),
+		invite:         os.Getenv("TEARENV_INVITE"),
+		profilePath:    defaultProfilePath(),
+		knownHostsPath: defaultKnownHostsPath(),
+	}
+	command := &cobra.Command{
+		Use:   "login",
+		Short: "Redeem a one-time invite and save a local profile",
+		Args:  cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			command.SilenceUsage = true
+			return login(command.Context(), options)
+		},
+	}
+	flags := command.Flags()
+	flags.StringVar(&options.serverAddress, "server", options.serverAddress, "SSH tunnel server")
+	flags.StringVar(&options.identity, "identity", options.identity, "developer identity from the invite")
+	flags.StringVar(&options.invite, "invite", options.invite, "one-time invite (or TEARENV_INVITE)")
+	flags.StringVar(&options.profilePath, "config", options.profilePath, "local profile destination")
+	flags.StringVar(&options.knownHostsPath, "known-hosts", options.knownHostsPath, "SSH known_hosts file")
+	flags.BoolVar(&options.insecure, "insecure-skip-host-key-check", false, "disable host identity verification (development only)")
+	return command
+}
+
+func login(ctx context.Context, options loginOptions) error {
+	hostKey, err := hostKeyCallback(options.knownHostsPath, options.insecure)
 	if err != nil {
 		return err
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	token, err := client.Enroll(ctx, client.EnrollmentConfig{
-		ServerAddress: *serverAddress,
-		Identity:      *identity,
-		Invite:        *invite,
+		ServerAddress: options.serverAddress,
+		Identity:      options.identity,
+		Invite:        options.invite,
 		HostKey:       hostKey,
 	})
 	if err != nil {
 		return err
 	}
-	if err := profile.Save(*profilePath, profile.Profile{
-		ServerAddress: *serverAddress,
-		Identity:      *identity,
+	if err := profile.Save(options.profilePath, profile.Profile{
+		ServerAddress: options.serverAddress,
+		Identity:      options.identity,
 		Token:         token,
-		KnownHosts:    *knownHostsPath,
-		Insecure:      *insecure,
+		KnownHosts:    options.knownHostsPath,
+		Insecure:      options.insecure,
 	}); err != nil {
 		return fmt.Errorf("save login: %w", err)
 	}
-	slog.Info("login saved", "identity", *identity, "server", *serverAddress, "config", *profilePath)
+	slog.Info("login saved", "identity", options.identity, "server", options.serverAddress, "config", options.profilePath)
 	return nil
 }
 
-func connect(arguments []string) error {
-	flags := flag.NewFlagSet("tearenv connect", flag.ContinueOnError)
-	profilePath := flags.String("config", defaultProfilePath(), "local profile created by tearenv login")
-	listenHost := flags.String("listen-host", "127.0.0.1", "default local listen host")
-	serverAddress := flags.String("server", "", "override the saved SSH server")
-	identity := flags.String("identity", "", "override the saved identity")
-	token := flags.String("token", os.Getenv("TEARENV_TOKEN"), "override the saved token (or TEARENV_TOKEN)")
-	knownHostsPath := flags.String("known-hosts", "", "override the saved known_hosts file")
-	insecure := flags.Bool("insecure-skip-host-key-check", false, "disable host identity verification (development only)")
-	if err := flags.Parse(arguments); err != nil {
-		return err
+func newServicesCommand() *cobra.Command {
+	options := servicesOptions{profilePath: defaultProfilePath()}
+	command := &cobra.Command{
+		Use:   "services",
+		Short: "List services granted to the saved identity",
+		Args:  cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			command.SilenceUsage = true
+			return services(command.Context(), options, command.OutOrStdout())
+		},
 	}
-	saved, err := profile.Load(*profilePath)
+	command.Flags().StringVar(&options.profilePath, "config", options.profilePath, "local profile created by tearenv login")
+	return command
+}
+
+func services(ctx context.Context, options servicesOptions, output io.Writer) error {
+	saved, err := profile.Load(options.profilePath)
 	if err != nil {
 		return fmt.Errorf("load login; run 'tearenv login' first: %w", err)
 	}
-	if *serverAddress != "" {
-		saved.ServerAddress = *serverAddress
+	hostKey, err := hostKeyCallback(saved.KnownHosts, saved.Insecure)
+	if err != nil {
+		return err
 	}
-	if *identity != "" {
-		saved.Identity = *identity
+	catalog, err := client.ListServices(ctx, client.ServiceClientConfig{
+		ServerAddress: saved.ServerAddress,
+		Identity:      saved.Identity,
+		Token:         saved.Token,
+		HostKey:       hostKey,
+	})
+	if err != nil {
+		return err
 	}
-	if *token != "" {
-		saved.Token = *token
+	for _, service := range catalog {
+		fmt.Fprintf(output, "%s\t127.0.0.1:%d\n", service.Name, service.LocalPort)
 	}
-	if *knownHostsPath != "" {
-		saved.KnownHosts = *knownHostsPath
+	return nil
+}
+
+func newConnectCommand() *cobra.Command {
+	options := connectOptions{
+		profilePath: defaultProfilePath(),
+		listenHost:  "127.0.0.1",
+		token:       os.Getenv("TEARENV_TOKEN"),
 	}
-	if *insecure {
+	command := &cobra.Command{
+		Use:   "connect [service[=host:port] ...]",
+		Short: "Expose granted services on local TCP listeners",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(command *cobra.Command, specifications []string) error {
+			command.SilenceUsage = true
+			return connect(command.Context(), options, specifications)
+		},
+	}
+	flags := command.Flags()
+	flags.StringVar(&options.profilePath, "config", options.profilePath, "local profile created by tearenv login")
+	flags.StringVar(&options.listenHost, "listen-host", options.listenHost, "default local listen host")
+	flags.StringVar(&options.serverAddress, "server", "", "override the saved SSH server")
+	flags.StringVar(&options.identity, "identity", "", "override the saved identity")
+	flags.StringVar(&options.token, "token", options.token, "override the saved token (or TEARENV_TOKEN)")
+	flags.StringVar(&options.knownHostsPath, "known-hosts", "", "override the saved known_hosts file")
+	flags.BoolVar(&options.insecure, "insecure-skip-host-key-check", false, "disable host identity verification (development only)")
+	return command
+}
+
+func connect(ctx context.Context, options connectOptions, specifications []string) error {
+	saved, err := profile.Load(options.profilePath)
+	if err != nil {
+		return fmt.Errorf("load login; run 'tearenv login' first: %w", err)
+	}
+	if options.serverAddress != "" {
+		saved.ServerAddress = options.serverAddress
+	}
+	if options.identity != "" {
+		saved.Identity = options.identity
+	}
+	if options.token != "" {
+		saved.Token = options.token
+	}
+	if options.knownHostsPath != "" {
+		saved.KnownHosts = options.knownHostsPath
+	}
+	if options.insecure {
 		saved.Insecure = true
 	}
 	hostKey, err := hostKeyCallback(saved.KnownHosts, saved.Insecure)
@@ -134,46 +225,17 @@ func connect(arguments []string) error {
 		Token:         saved.Token,
 		HostKey:       hostKey,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	catalog, err := client.ListServices(ctx, clientConfig)
 	if err != nil {
 		return err
 	}
-	requested, err := selectServices(catalog, flags.Args(), *listenHost)
+	requested, err := selectServices(catalog, specifications, options.listenHost)
 	if err != nil {
 		return err
 	}
 	return client.RunServices(ctx, clientConfig, requested, nil)
-}
-
-func services(arguments []string) error {
-	flags := flag.NewFlagSet("tearenv services", flag.ContinueOnError)
-	profilePath := flags.String("config", defaultProfilePath(), "local profile created by tearenv login")
-	if err := flags.Parse(arguments); err != nil {
-		return err
-	}
-	saved, err := profile.Load(*profilePath)
-	if err != nil {
-		return fmt.Errorf("load login; run 'tearenv login' first: %w", err)
-	}
-	hostKey, err := hostKeyCallback(saved.KnownHosts, saved.Insecure)
-	if err != nil {
-		return err
-	}
-	catalog, err := client.ListServices(context.Background(), client.ServiceClientConfig{
-		ServerAddress: saved.ServerAddress,
-		Identity:      saved.Identity,
-		Token:         saved.Token,
-		HostKey:       hostKey,
-	})
-	if err != nil {
-		return err
-	}
-	for _, service := range catalog {
-		fmt.Fprintf(os.Stdout, "%s\t127.0.0.1:%d\n", service.Name, service.LocalPort)
-	}
-	return nil
 }
 
 func selectServices(catalog []protocol.Service, specifications []string, listenHost string) ([]client.LocalService, error) {
@@ -204,13 +266,6 @@ func selectServices(catalog []protocol.Service, specifications []string, listenH
 		return nil, errors.New("no services are granted to this identity")
 	}
 	return selected, nil
-}
-
-func printUsage() {
-	fmt.Fprintln(os.Stderr, "usage: tearenv <login|services|connect> [options]")
-	fmt.Fprintln(os.Stderr, "  login    redeem a one-time invite and save a local profile")
-	fmt.Fprintln(os.Stderr, "  services list services granted to the saved identity")
-	fmt.Fprintln(os.Stderr, "  connect  expose granted services on local TCP listeners")
 }
 
 func defaultIdentity() string {

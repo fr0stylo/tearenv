@@ -24,18 +24,18 @@ This creates `bin/tearenv` and `bin/tearenvd`.
 Create an identity and grant a service:
 
 ```sh
-INVITE=$(./bin/tearenvd invite -identity alice)
+INVITE=$(./bin/tearenvd invite --identity alice)
 
 ./bin/tearenvd service grant \
-  -identity alice \
-  -name postgres \
-  -target postgres.internal:5432
+  --identity alice \
+  --name postgres \
+  --target postgres.internal:5432
 ```
 
 Start the gateway:
 
 ```sh
-./bin/tearenvd serve -listen :2222
+./bin/tearenvd serve --listen :2222
 ```
 
 ## Connect as a developer
@@ -44,9 +44,9 @@ Verify the gateway's SSH host key, then redeem the one-time invite:
 
 ```sh
 tearenv login \
-  -identity alice \
-  -server gateway.example.com:2222 \
-  -invite "$INVITE"
+  --identity alice \
+  --server gateway.example.com:2222 \
+  --invite "$INVITE"
 ```
 
 List and connect the granted services:

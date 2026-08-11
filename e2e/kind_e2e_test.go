@@ -216,7 +216,7 @@ func startKindClient(t *testing.T, root, temporary, clientBinary, sshAddress, kn
 	}
 	localAddress := reserveAddress(t)
 	clientProcess := startProcess(t, root, filepath.Join(temporary, identity+"-client.log"),
-		clientBinary, "connect", "-config", profilePath, "http="+localAddress,
+		clientBinary, "connect", "--config", profilePath, "http="+localAddress,
 	)
 	t.Cleanup(func() { clientProcess.stop(t) })
 	waitForLog(t, clientProcess.logPath, "service ready")

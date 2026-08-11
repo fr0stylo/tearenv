@@ -32,17 +32,17 @@ Run:
 
 ```sh
 tearenv login \
-  -identity alice \
-  -server gateway.example.com:2222 \
-  -invite "$INVITE"
+  --identity alice \
+  --server gateway.example.com:2222 \
+  --invite "$INVITE"
 ```
 
 You can avoid putting the invite in shell history by using the environment:
 
 ```sh
 TEARENV_INVITE="$INVITE" tearenv login \
-  -identity alice \
-  -server gateway.example.com:2222
+  --identity alice \
+  --server gateway.example.com:2222
 ```
 
 On Linux, the default profile is typically `~/.config/tearenv/config.json`. The exact location follows the operating system's user configuration directory. `tearenv` creates the directory with mode `0700` and the profile with mode `0600`.
@@ -90,32 +90,32 @@ tearenv connect \
   grpc
 ```
 
-Use `-listen-host` to change the host for aliases that don't have explicit overrides:
+Use `--listen-host` to change the host for aliases that don't have explicit overrides:
 
 ```sh
-tearenv connect -listen-host 127.0.0.2 postgres redis
+tearenv connect --listen-host 127.0.0.2 postgres redis
 ```
 
-Options must come before service arguments because the Go flag parser stops at the first positional argument.
+Cobra accepts flags before or after service arguments. The examples put flags first for consistency.
 
 Don't bind to `0.0.0.0` or another non-loopback address unless you intend to expose the local listener to other machines and have secured the host firewall. tearenv authenticates the SSH connection, but it doesn't authenticate applications connecting to the local listener.
 
 ## Use more than one profile
 
-Use `-config` when you need separate gateways or identities:
+Use `--config` when you need separate gateways or identities:
 
 ```sh
 tearenv login \
-  -config ~/.config/tearenv/staging.json \
-  -identity alice \
-  -server staging-gateway.example.com:2222 \
-  -invite "$STAGING_INVITE"
+  --config ~/.config/tearenv/staging.json \
+  --identity alice \
+  --server staging-gateway.example.com:2222 \
+  --invite "$STAGING_INVITE"
 
-tearenv services -config ~/.config/tearenv/staging.json
-tearenv connect -config ~/.config/tearenv/staging.json postgres
+tearenv services --config ~/.config/tearenv/staging.json
+tearenv connect --config ~/.config/tearenv/staging.json postgres
 ```
 
-`connect` can temporarily override the saved server, identity, token, or `known_hosts` path. `TEARENV_TOKEN` is used only when `-token` isn't set, and either value overrides the saved token. These overrides are useful for automation, but keeping tokens in environment variables can expose them to local process inspection or debug output.
+`connect` can temporarily override the saved server, identity, token, or `known_hosts` path. `TEARENV_TOKEN` is used only when `--token` isn't set, and either value overrides the saved token. These overrides are useful for automation, but keeping tokens in environment variables can expose them to local process inspection or debug output.
 
 ## Expect cold starts and idle behavior
 

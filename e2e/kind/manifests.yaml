@@ -51,13 +51,13 @@ spec:
           command: ["/usr/local/bin/tearenvd"]
           args:
             - serve
-            - -listen
+            - --listen
             - :2222
-            - -host-key
+            - --host-key
             - /etc/tearenv/host_key
-            - -users
+            - --users
             - /etc/tearenv/users.json
-            - -scaler
+            - --scaler
             - kubernetes
           ports:
             - name: ssh

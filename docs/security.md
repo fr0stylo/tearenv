@@ -25,7 +25,7 @@ This boundary limits gateway-mediated access. It doesn't compensate for other ne
 
 Keep the Ed25519 host private key stable and protected. Developers must compare its public fingerprint through a trusted channel before login. `ssh-keyscan` discovers a key but doesn't prove its identity.
 
-Use `-insecure-skip-host-key-check` only for disposable local development. It makes the client accept any host key and enables machine-in-the-middle attacks that can capture an invite or personal token.
+Use `--insecure-skip-host-key-check` only for disposable local development. It makes the client accept any host key and enables machine-in-the-middle attacks that can capture an invite or personal token.
 
 Plan host-key rotation like any SSH infrastructure change: publish the new fingerprint securely, update known-hosts entries, and investigate any unexpected mismatch.
 

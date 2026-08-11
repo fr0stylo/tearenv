@@ -6,7 +6,7 @@ Start on the side that reports the failure. Client startup failures usually conc
 
 ### `invite is required`
 
-Pass `-invite` or set `TEARENV_INVITE` for the `login` process. Confirm the variable isn't empty:
+Pass `--invite` or set `TEARENV_INVITE` for the `login` process. Confirm the variable isn't empty:
 
 ```sh
 test -n "$TEARENV_INVITE" && echo "invite is set"
@@ -33,11 +33,11 @@ ssh-keyscan -p 2222 gateway.example.com > /tmp/tearenv-current-key
 ssh-keygen -lf /tmp/tearenv-current-key
 ```
 
-Don't delete an old key or use `-insecure-skip-host-key-check` until the operator confirms an intentional rotation. An unexpected change can indicate the wrong endpoint or an interception attempt.
+Don't delete an old key or use `--insecure-skip-host-key-check` until the operator confirms an intentional rotation. An unexpected change can indicate the wrong endpoint or an interception attempt.
 
 ### `load known_hosts` reports a missing file
 
-Create the file after verifying the key, or pass its actual path with `-known-hosts`. In containers and service accounts, `~/.ssh/known_hosts` may not exist.
+Create the file after verifying the key, or pass its actual path with `--known-hosts`. In containers and service accounts, `~/.ssh/known_hosts` may not exist.
 
 ## Fix profile and authentication failures
 
@@ -46,7 +46,7 @@ Create the file after verifying the key, or pass its actual path with `-known-ho
 The default profile doesn't exist or can't be read. Run `tearenv login`, or pass the profile you already created:
 
 ```sh
-tearenv services -config ~/.config/tearenv/staging.json
+tearenv services --config ~/.config/tearenv/staging.json
 ```
 
 ### Profile permissions are rejected
@@ -64,7 +64,7 @@ If a mounted filesystem can't enforce Unix modes, place the profile on a filesys
 
 Check the saved `server` and `identity`, then ask the operator whether a new invite was redeemed for the same identity. Redeeming it rotates the personal token, so older profiles stop authenticating. Login again with the current invite.
 
-Temporary `-identity`, `-token`, `TEARENV_TOKEN`, and `-server` overrides can also create a mismatched identity/token pair. Remove the overrides and retry with the saved profile.
+Temporary `--identity`, `--token`, `TEARENV_TOKEN`, and `--server` overrides can also create a mismatched identity/token pair. Remove the overrides and retry with the saved profile.
 
 ## Fix service selection and local listeners
 
@@ -100,10 +100,10 @@ If multiple selected services have the same suggested port, override at least on
 
 ### The credential file is missing or empty
 
-Create the first invite with the same `-users` path before starting `serve`:
+Create the first invite with the same `--users` path before starting `serve`:
 
 ```sh
-tearenvd invite -users /var/lib/tearenv/users.json -identity alice
+tearenvd invite --users /var/lib/tearenv/users.json --identity alice
 ```
 
 ### Credential permissions are rejected
@@ -133,11 +133,11 @@ Check the configured port:
 ss -ltnp | grep ':2222'
 ```
 
-Stop the other listener or change `-listen`. Developers must use the same published address and known-hosts entry.
+Stop the other listener or change `--listen`. Developers must use the same published address and known-hosts entry.
 
 ### Kubernetes scaler configuration fails outside a pod
 
-`-scaler kubernetes` loads only in-cluster configuration. Running it on a workstation, even with a valid `KUBECONFIG`, reports an in-cluster configuration error. Run `tearenvd` in a Kubernetes pod, or omit the scaler for static services.
+`--scaler kubernetes` loads only in-cluster configuration. Running it on a workstation, even with a valid `KUBECONFIG`, reports an in-cluster configuration error. Run `tearenvd` in a Kubernetes pod, or omit the scaler for static services.
 
 ## Fix target and scaling failures
 
@@ -175,7 +175,7 @@ kubectl -n dev-alice get events --sort-by=.lastTimestamp
 
 ### The workload scales up but the connection times out
 
-tearenvd waits for the grant's target to accept TCP, not for a Kubernetes Ready condition. Check DNS, the Service selector and port, endpoints, pod listener, and network policy from the gateway pod. Increase `-ready-timeout` only after confirming the workload genuinely needs more startup time.
+tearenvd waits for the grant's target to accept TCP, not for a Kubernetes Ready condition. Check DNS, the Service selector and port, endpoints, pod listener, and network policy from the gateway pod. Increase `--ready-timeout` only after confirming the workload genuinely needs more startup time.
 
 A readiness timeout triggers a best-effort scale-down to zero when no connection became active.
 
