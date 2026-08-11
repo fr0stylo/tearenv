@@ -15,16 +15,22 @@ tearenvd completion --help
 
 ### `tearenv login`
 
-Redeems a one-time invite and atomically writes a local profile.
+Creates a token or Kubernetes public-key login and atomically writes a local profile.
 
-| Option                           | Default                                                 | Meaning                                                          |
-| -------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
-| `--server`                       | `127.0.0.1:2222`                                        | SSH gateway address.                                             |
-| `--identity`                     | Current OS account name, or `tunnel` if unavailable     | Identity named by the invite.                                    |
-| `--invite`                       | `TEARENV_INVITE`                                        | One-time invite. The flag takes precedence over the environment. |
-| `--config`                       | OS config directory plus `tearenv/config.json`          | Profile destination.                                             |
-| `--known-hosts`                  | `~/.ssh/known_hosts` when a home directory is available | OpenSSH known-hosts file.                                        |
-| `--insecure-skip-host-key-check` | `false`                                                 | Disables gateway identity verification for development.          |
+| Option                           | Default                                                 | Meaning                                                 |
+| -------------------------------- | ------------------------------------------------------- | ------------------------------------------------------- |
+| `--method`                       | `token`                                                 | Login method: `token` or `kubernetes`.                  |
+| `--server`                       | `127.0.0.1:2222`                                        | SSH gateway address.                                    |
+| `--identity`                     | Current OS account name, or `tunnel` if unavailable     | Gateway identity.                                       |
+| `--invite`                       | `TEARENV_INVITE`                                        | One-time invite for token login.                        |
+| `--private-key`                  | OS config directory plus `tearenv/id_ed25519`           | Private key created or reused for Kubernetes login.     |
+| `--config`                       | OS config directory plus `tearenv/config.json`          | Profile destination.                                    |
+| `--known-hosts`                  | `~/.ssh/known_hosts` when a home directory is available | OpenSSH known-hosts file.                               |
+| `--kubeconfig`                   | Standard kubeconfig loading                             | Explicit kubeconfig for Kubernetes login.               |
+| `--kubernetes-context`           | Current kubeconfig context                              | Context used to update the authorized-keys Secret.      |
+| `--kubernetes-namespace`         | `tearenv-system`                                        | Namespace containing the authorized-keys Secret.        |
+| `--kubernetes-secret`            | `tearenv-authorized-keys`                               | Authorized-keys Secret name.                            |
+| `--insecure-skip-host-key-check` | `false`                                                 | Disables gateway identity verification for development. |
 
 ### `tearenv services`
 
@@ -45,6 +51,7 @@ Opens local TCP listeners for all granted services, or for the listed aliases. A
 | `--server`                       | Saved value                                    | Temporary gateway override.                                                              |
 | `--identity`                     | Saved value                                    | Temporary identity override.                                                             |
 | `--token`                        | `TEARENV_TOKEN`, then saved value              | Temporary personal-token override.                                                       |
+| `--private-key`                  | Saved value                                    | Temporary SSH private-key override.                                                      |
 | `--known-hosts`                  | Saved value                                    | Temporary known-hosts override.                                                          |
 | `--insecure-skip-host-key-check` | Saved value                                    | Enables insecure verification for this run. It can't turn off an insecure saved profile. |
 
@@ -68,7 +75,7 @@ The command prints the plaintext invite to standard output. Issuing a new invite
 | Option                 | Default                       | Meaning                                                                         |
 | ---------------------- | ----------------------------- | ------------------------------------------------------------------------------- |
 | `--users`              | `.data/users.json`            | Credential and policy file.                                                     |
-| `--identity`           | Required                      | Registered or invited identity receiving the grant.                             |
+| `--identity`           | Required                      | Identity receiving the grant. It may use an external authentication provider.   |
 | `--name`               | Required                      | Client-visible lowercase alias.                                                 |
 | `--target`             | Required                      | Gateway-reachable `host:port`. Use `[IPv6]:port` for IPv6 literals.             |
 | `--local-port`         | Target port                   | Suggested client-side port, from 1 through 65535.                               |
@@ -83,13 +90,14 @@ Durations use Go syntax such as `500ms`, `30s`, `2m`, or `1h30m`. Negative timeo
 
 ### `tearenvd serve`
 
-| Option         | Default                      | Meaning                                             |
-| -------------- | ---------------------------- | --------------------------------------------------- |
-| `--listen`     | `:2222`                      | SSH listen address.                                 |
-| `--host-key`   | `.data/ssh_host_ed25519_key` | Persistent SSH private host key.                    |
-| `--users`      | `.data/users.json`           | Credential and policy file.                         |
-| `--scaler`     | None                         | Scaler backend. The included value is `kubernetes`. |
-| `--kubernetes` | `false`                      | Deprecated alias for `--scaler kubernetes`.         |
+| Option              | Default                      | Meaning                                                        |
+| ------------------- | ---------------------------- | -------------------------------------------------------------- |
+| `--listen`          | `:2222`                      | SSH listen address.                                            |
+| `--host-key`        | `.data/ssh_host_ed25519_key` | Persistent SSH private host key.                               |
+| `--users`           | `.data/users.json`           | Credential and policy file.                                    |
+| `--authorized-keys` | None                         | Identity-bound public-key JSON, usually from a mounted Secret. |
+| `--scaler`          | None                         | Scaler backend. The included value is `kubernetes`.            |
+| `--kubernetes`      | `false`                      | Deprecated alias for `--scaler kubernetes`.                    |
 
 ## Understand the client profile
 
@@ -116,6 +124,19 @@ An insecure development profile instead contains:
 ```
 
 Don't commit, distribute, or log this file. The token authenticates as its identity.
+
+A Kubernetes public-key profile stores a private-key path instead of a token:
+
+```json
+{
+  "server": "gateway.example.com:2222",
+  "identity": "alice",
+  "private_key": "/home/alice/.config/tearenv/id_ed25519",
+  "known_hosts": "/home/alice/.ssh/known_hosts"
+}
+```
+
+The private key file and profile must both have mode `0600`.
 
 ## Understand the credential and policy file
 
@@ -157,6 +178,21 @@ The server file is JSON and must have mode `0600`. Administrative commands creat
 The file stores SHA256 hashes rather than plaintext personal tokens and invites. Older files with a plaintext `token` field of at least 16 characters are accepted for migration and rewritten as hashes on the next administrative mutation.
 
 Don't expose this file to clients. Even without plaintext secrets, it contains private targets, identity policy, and workload metadata.
+
+The store may contain only `access` entries when every identity uses an external authentication provider. `tearenvd service grant` creates a new policy file when the configured path doesn't exist.
+
+## Understand the authorized-keys document
+
+`--authorized-keys` reads a JSON object from identity to one or more OpenSSH public keys:
+
+```json
+{
+  "alice": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."],
+  "bob": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."]
+}
+```
+
+The file may be read-only or world-readable because it contains public material, but it must not be group- or world-writable. The gateway validates the full document at startup and reloads it for every public-key authentication attempt.
 
 ## Apply naming and value rules
 

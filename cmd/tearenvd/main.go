@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fr0stylo/tearenv/internal/authorization"
 	"github.com/fr0stylo/tearenv/internal/kube"
 	"github.com/fr0stylo/tearenv/internal/scaler"
 	"github.com/fr0stylo/tearenv/internal/server"
@@ -45,11 +46,12 @@ type inviteOptions struct {
 }
 
 type serveOptions struct {
-	listenAddress string
-	hostKeyPath   string
-	usersPath     string
-	scalerName    string
-	kubernetes    bool
+	listenAddress      string
+	hostKeyPath        string
+	usersPath          string
+	authorizedKeysPath string
+	scalerName         string
+	kubernetes         bool
 }
 
 func main() {
@@ -105,7 +107,7 @@ func newGrantCommand() *cobra.Command {
 		},
 	}
 	flags := command.Flags()
-	flags.StringVar(&options.usersPath, "users", options.usersPath, "per-user credentials and access JSON file")
+	flags.StringVar(&options.usersPath, "users", options.usersPath, "authentication credentials and access policy JSON file")
 	flags.StringVar(&options.identity, "identity", "", "developer identity receiving access")
 	flags.StringVar(&options.name, "name", "", "client-visible service name")
 	flags.StringVar(&options.target, "target", "", "server-side service DNS name and port")
@@ -127,13 +129,13 @@ func grantService(options grantOptions) error {
 	if options.replicas < 1 || int64(options.replicas) > 2147483647 {
 		return fmt.Errorf("replicas %d is invalid", options.replicas)
 	}
-	service := server.Service{
+	service := authorization.Service{
 		Name:      options.name,
 		Target:    options.target,
 		LocalPort: uint32(options.localPort),
 	}
 	if options.workloadKind != "" {
-		service.Workload = &server.Workload{
+		service.Workload = &authorization.Workload{
 			Kind:         options.workloadKind,
 			Namespace:    options.workloadNamespace,
 			Name:         options.workloadName,
@@ -142,7 +144,7 @@ func grantService(options grantOptions) error {
 			IdleTimeout:  options.idleTimeout,
 		}
 	}
-	if err := server.GrantService(options.usersPath, options.identity, service); err != nil {
+	if err := authorization.GrantService(options.usersPath, options.identity, service); err != nil {
 		return fmt.Errorf("grant service: %w", err)
 	}
 	slog.Info("service granted", "identity", options.identity, "service", options.name, "target", options.target)
@@ -161,14 +163,14 @@ func newInviteCommand() *cobra.Command {
 		},
 	}
 	flags := command.Flags()
-	flags.StringVar(&options.usersPath, "users", options.usersPath, "per-user credentials JSON file")
+	flags.StringVar(&options.usersPath, "users", options.usersPath, "authentication credentials and access policy JSON file")
 	flags.StringVar(&options.identity, "identity", "", "developer identity to invite")
 	mustMarkRequired(command, "identity")
 	return command
 }
 
 func createInvite(options inviteOptions, output io.Writer) error {
-	invite, err := server.CreateInvite(options.usersPath, options.identity)
+	invite, err := authorization.CreateInvite(options.usersPath, options.identity)
 	if err != nil {
 		return fmt.Errorf("create invite: %w", err)
 	}
@@ -194,7 +196,8 @@ func newServeCommand() *cobra.Command {
 	flags := command.Flags()
 	flags.StringVar(&options.listenAddress, "listen", options.listenAddress, "SSH listen address")
 	flags.StringVar(&options.hostKeyPath, "host-key", options.hostKeyPath, "persistent SSH host private key")
-	flags.StringVar(&options.usersPath, "users", options.usersPath, "per-user credentials JSON file")
+	flags.StringVar(&options.usersPath, "users", options.usersPath, "authentication credentials and access policy JSON file")
+	flags.StringVar(&options.authorizedKeysPath, "authorized-keys", "", "identity-bound SSH public keys JSON file (for example, a mounted Kubernetes Secret)")
 	flags.StringVar(&options.scalerName, "scaler", "", "workload scaler backend (supported: kubernetes)")
 	flags.BoolVar(&options.kubernetes, "kubernetes", false, "deprecated alias for --scaler kubernetes")
 	if err := flags.MarkDeprecated("kubernetes", "use --scaler kubernetes instead"); err != nil {
@@ -204,7 +207,19 @@ func newServeCommand() *cobra.Command {
 }
 
 func serve(ctx context.Context, options serveOptions) error {
-	credentials, err := server.LoadCredentials(options.usersPath)
+	credentials, err := authorization.LoadCredentials(options.usersPath)
+	if err != nil {
+		return err
+	}
+	providers := []authorization.Authenticator{credentials}
+	if options.authorizedKeysPath != "" {
+		publicKeys, err := authorization.LoadPublicKeys(options.authorizedKeysPath)
+		if err != nil {
+			return err
+		}
+		providers = append(providers, publicKeys)
+	}
+	authenticator, err := authorization.NewChain(providers...)
 	if err != nil {
 		return err
 	}
@@ -225,9 +240,11 @@ func serve(ctx context.Context, options serveOptions) error {
 	}
 	gateway := server.NewLifecycleGateway(credentials, backend, slog.Default())
 	tunnelServer, err := server.New(server.Config{
-		Credentials: credentials,
-		Signer:      signer,
-		Gateway:     gateway,
+		Authenticator: authenticator,
+		Enrollment:    credentials,
+		Policy:        credentials,
+		Signer:        signer,
+		Gateway:       gateway,
 	})
 	if err != nil {
 		return fmt.Errorf("configure server: %w", err)
@@ -242,6 +259,7 @@ func serve(ctx context.Context, options serveOptions) error {
 	slog.Info("tearenvd ready",
 		"ssh", listener.Addr(),
 		"users", options.usersPath,
+		"authorized_keys", options.authorizedKeysPath,
 		"scaler", selectedScaler,
 		"host_key_fingerprint", ssh.FingerprintSHA256(signer.PublicKey()),
 	)

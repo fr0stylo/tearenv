@@ -1,4 +1,4 @@
-package server
+package authorization
 
 import (
 	"os"
@@ -15,13 +15,13 @@ func TestCredentialsAuthenticateIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !credentials.Authenticate("alice", "alice-token-long-enough") {
+	if !credentials.AuthenticateToken("alice", "alice-token-long-enough") {
 		t.Fatal("alice was not authenticated")
 	}
-	if credentials.Authenticate("bob", "alice-token-long-enough") {
+	if credentials.AuthenticateToken("bob", "alice-token-long-enough") {
 		t.Fatal("alice's token authenticated as bob")
 	}
-	if credentials.Authenticate("mallory", "alice-token-long-enough") {
+	if credentials.AuthenticateToken("mallory", "alice-token-long-enough") {
 		t.Fatal("unknown identity was authenticated")
 	}
 }
@@ -54,7 +54,7 @@ func TestInviteEnrollmentIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !credentials.Authenticate("alice", token) {
+	if !credentials.AuthenticateToken("alice", token) {
 		t.Fatal("enrolled token was not authenticated")
 	}
 	if credentials.AuthenticateInvite("alice", invite) {
@@ -68,7 +68,7 @@ func TestInviteEnrollmentIsSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reloaded.Authenticate("alice", token) {
+	if !reloaded.AuthenticateToken("alice", token) {
 		t.Fatal("enrolled token did not survive reload")
 	}
 	contents, err := os.ReadFile(path)
@@ -106,10 +106,10 @@ func TestNewInviteReloadsAndRotatesExistingIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if credentials.Authenticate("alice", firstToken) {
+	if credentials.AuthenticateToken("alice", firstToken) {
 		t.Fatal("old token remained valid after login rotation")
 	}
-	if !credentials.Authenticate("alice", secondToken) {
+	if !credentials.AuthenticateToken("alice", secondToken) {
 		t.Fatal("rotated token was not authenticated")
 	}
 }
@@ -173,5 +173,30 @@ func TestGrantServiceAcceptsBackendSpecificWorkload(t *testing.T) {
 	}
 	if service.Workload.Kind != "container" || service.Workload.Namespace != "" || service.Workload.Replicas != 1 {
 		t.Fatalf("workload = %#v", service.Workload)
+	}
+}
+
+func TestGrantServiceCreatesPolicyForExternalIdentity(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "access.json")
+	if err := GrantService(path, "alice", Service{
+		Name: "postgres", Target: "postgres.dev.svc:5432",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := LoadCredentials(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services, err := policy.Services("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(services) != 1 || services[0].Name != "postgres" {
+		t.Fatalf("Services() = %#v, want postgres", services)
+	}
+	if policy.AuthenticateToken("alice", "not-a-real-token") {
+		t.Fatal("policy-only identity unexpectedly authenticated with a token")
 	}
 }

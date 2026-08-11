@@ -18,6 +18,7 @@ type ServiceClientConfig struct {
 	ServerAddress string
 	Identity      string
 	Token         string
+	Signer        ssh.Signer
 	HostKey       ssh.HostKeyCallback
 	DialTimeout   time.Duration
 	Logger        *slog.Logger
@@ -171,8 +172,8 @@ func (config *ServiceClientConfig) setDefaults() {
 }
 
 func (config ServiceClientConfig) validate() error {
-	if config.Token == "" {
-		return errors.New("token cannot be empty")
+	if config.Token == "" && config.Signer == nil {
+		return errors.New("token or private key is required")
 	}
 	if config.HostKey == nil {
 		return errors.New("host key verifier is required")
@@ -184,9 +185,16 @@ func (config ServiceClientConfig) validate() error {
 }
 
 func (config ServiceClientConfig) dial(ctx context.Context) (*ssh.Client, error) {
+	authentication := make([]ssh.AuthMethod, 0, 2)
+	if config.Signer != nil {
+		authentication = append(authentication, ssh.PublicKeys(config.Signer))
+	}
+	if config.Token != "" {
+		authentication = append(authentication, ssh.Password(config.Token))
+	}
 	sshConfig := &ssh.ClientConfig{
 		User:            config.Identity,
-		Auth:            []ssh.AuthMethod{ssh.Password(config.Token)},
+		Auth:            authentication,
 		HostKeyCallback: config.HostKey,
 		Timeout:         config.DialTimeout,
 	}

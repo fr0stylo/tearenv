@@ -15,9 +15,13 @@ func TestRootCommandExposesDeveloperWorkflow(t *testing.T) {
 		path  []string
 		flags []string
 	}{
-		{path: []string{"login"}, flags: []string{"server", "identity", "invite", "config", "known-hosts", "insecure-skip-host-key-check"}},
+		{path: []string{"login"}, flags: []string{
+			"method", "server", "identity", "invite", "private-key", "config", "known-hosts",
+			"kubeconfig", "kubernetes-context", "kubernetes-namespace", "kubernetes-secret",
+			"insecure-skip-host-key-check",
+		}},
 		{path: []string{"services"}, flags: []string{"config"}},
-		{path: []string{"connect"}, flags: []string{"config", "listen-host", "server", "identity", "token", "known-hosts", "insecure-skip-host-key-check"}},
+		{path: []string{"connect"}, flags: []string{"config", "listen-host", "server", "identity", "token", "private-key", "known-hosts", "insecure-skip-host-key-check"}},
 	}
 
 	for _, test := range tests {

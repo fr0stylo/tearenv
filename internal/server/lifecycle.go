@@ -9,22 +9,23 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fr0stylo/tearenv/internal/authorization"
 	"github.com/fr0stylo/tearenv/internal/scaler"
 )
 
 var ErrScalerUnavailable = errors.New("service requires scaling but no scaler backend is configured")
 
 type lifecycleGateway struct {
-	credentials *Credentials
-	scaler      scaler.Backend
-	logger      *slog.Logger
-	mu          sync.Mutex
-	runtimes    map[string]*serviceRuntime
+	policy   authorization.Policy
+	scaler   scaler.Backend
+	logger   *slog.Logger
+	mu       sync.Mutex
+	runtimes map[string]*serviceRuntime
 }
 
 type serviceRuntime struct {
 	mu        sync.Mutex
-	workload  *Workload
+	workload  *authorization.Workload
 	label     string
 	active    int
 	scaled    bool
@@ -33,20 +34,20 @@ type serviceRuntime struct {
 
 // NewLifecycleGateway creates the service runtime boundary. A nil scaler is
 // valid for static services but rejects grants containing workload metadata.
-func NewLifecycleGateway(credentials *Credentials, backend scaler.Backend, logger *slog.Logger) ServiceGateway {
+func NewLifecycleGateway(policy authorization.Policy, backend scaler.Backend, logger *slog.Logger) ServiceGateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &lifecycleGateway{
-		credentials: credentials,
-		scaler:      backend,
-		logger:      logger,
-		runtimes:    make(map[string]*serviceRuntime),
+		policy:   policy,
+		scaler:   backend,
+		logger:   logger,
+		runtimes: make(map[string]*serviceRuntime),
 	}
 }
 
-func (gateway *lifecycleGateway) Services(_ context.Context, identity string) ([]Service, error) {
-	return gateway.credentials.Services(identity)
+func (gateway *lifecycleGateway) Services(_ context.Context, identity string) ([]authorization.Service, error) {
+	return gateway.policy.Services(identity)
 }
 
 // Shutdown cancels idle timers and scales down workloads started by this gateway.
@@ -65,7 +66,7 @@ func (gateway *lifecycleGateway) Shutdown(ctx context.Context) error {
 			runtime.idleTimer = nil
 		}
 		if runtime.scaled && runtime.workload != nil {
-			if err := gateway.scaler.Scale(ctx, runtime.workload.scalerTarget(), 0); err != nil && firstError == nil {
+			if err := gateway.scaler.Scale(ctx, scalerTarget(runtime.workload), 0); err != nil && firstError == nil {
 				firstError = err
 			} else if err == nil {
 				runtime.scaled = false
@@ -76,10 +77,10 @@ func (gateway *lifecycleGateway) Shutdown(ctx context.Context) error {
 	return firstError
 }
 
-func (gateway *lifecycleGateway) Open(ctx context.Context, identity, name string) (net.Conn, Service, error) {
-	service, allowed := gateway.credentials.ResolveService(identity, name)
+func (gateway *lifecycleGateway) Open(ctx context.Context, identity, name string) (net.Conn, authorization.Service, error) {
+	service, allowed := gateway.policy.ResolveService(identity, name)
 	if !allowed {
-		return nil, Service{}, ErrServiceDenied
+		return nil, authorization.Service{}, ErrServiceDenied
 	}
 	runtime := gateway.runtime(identity, service)
 	runtime.mu.Lock()
@@ -98,7 +99,7 @@ func (gateway *lifecycleGateway) Open(ctx context.Context, identity, name string
 			return nil, service, ErrScalerUnavailable
 		}
 		gateway.logger.Info("scaling service up", "identity", identity, "service", name, "replicas", service.Workload.Replicas)
-		if err := gateway.scaler.Scale(ctx, service.Workload.scalerTarget(), service.Workload.Replicas); err != nil {
+		if err := gateway.scaler.Scale(ctx, scalerTarget(service.Workload), service.Workload.Replicas); err != nil {
 			return nil, service, fmt.Errorf("scale service up: %w", err)
 		}
 		runtime.scaled = true
@@ -108,7 +109,7 @@ func (gateway *lifecycleGateway) Open(ctx context.Context, identity, name string
 	if err != nil {
 		if service.Workload != nil && runtime.active == 0 {
 			downscaleCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			_ = gateway.scaler.Scale(downscaleCtx, service.Workload.scalerTarget(), 0)
+			_ = gateway.scaler.Scale(downscaleCtx, scalerTarget(service.Workload), 0)
 			cancel()
 			runtime.scaled = false
 		}
@@ -121,7 +122,7 @@ func (gateway *lifecycleGateway) Open(ctx context.Context, identity, name string
 	}, service, nil
 }
 
-func (gateway *lifecycleGateway) runtime(identity string, service Service) *serviceRuntime {
+func (gateway *lifecycleGateway) runtime(identity string, service authorization.Service) *serviceRuntime {
 	key := identity + "\x00" + service.Name
 	if service.Workload != nil {
 		key = "workload\x00" + service.Workload.Kind + "\x00" + service.Workload.Namespace + "\x00" + service.Workload.Name
@@ -155,7 +156,7 @@ func (gateway *lifecycleGateway) release(runtime *serviceRuntime) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := gateway.scaler.Scale(ctx, runtime.workload.scalerTarget(), 0); err != nil {
+		if err := gateway.scaler.Scale(ctx, scalerTarget(runtime.workload), 0); err != nil {
 			gateway.logger.Warn("service downscale failed", "service", runtime.label, "error", err)
 			return
 		}
@@ -165,7 +166,7 @@ func (gateway *lifecycleGateway) release(runtime *serviceRuntime) {
 	})
 }
 
-func dialService(ctx context.Context, service Service) (net.Conn, error) {
+func dialService(ctx context.Context, service authorization.Service) (net.Conn, error) {
 	if service.Workload == nil {
 		connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", service.Target)
 		if err != nil {
@@ -190,6 +191,10 @@ func dialService(ctx context.Context, service Service) (net.Conn, error) {
 		case <-ticker.C:
 		}
 	}
+}
+
+func scalerTarget(workload *authorization.Workload) scaler.Target {
+	return scaler.Target{Kind: workload.Kind, Namespace: workload.Namespace, Name: workload.Name}
 }
 
 type trackedConnection struct {

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fr0stylo/tearenv/internal/authorization"
 	scalerpkg "github.com/fr0stylo/tearenv/internal/scaler"
 )
 
@@ -60,19 +61,19 @@ func TestLifecycleGatewayDeniesAnotherIdentity(t *testing.T) {
 func TestLifecycleGatewaySharesActivityAcrossAliases(t *testing.T) {
 	address := reserveTCPAddress(t)
 	path := filepath.Join(t.TempDir(), "users.json")
-	if _, err := CreateInvite(path, "alice"); err != nil {
+	if _, err := authorization.CreateInvite(path, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	workload := &Workload{
+	workload := &authorization.Workload{
 		Kind: "statefulset", Namespace: "dev-alice", Name: "database",
 		Replicas: 1, ReadyTimeout: time.Second, IdleTimeout: 30 * time.Millisecond,
 	}
 	for _, name := range []string{"postgres", "grpc"} {
-		if err := GrantService(path, "alice", Service{Name: name, Target: address, Workload: workload}); err != nil {
+		if err := authorization.GrantService(path, "alice", authorization.Service{Name: name, Target: address, Workload: workload}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	credentials, err := LoadCredentials(path)
+	credentials, err := authorization.LoadCredentials(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,19 +105,19 @@ func TestLifecycleGatewaySharesActivityAcrossAliases(t *testing.T) {
 
 func TestLifecycleGatewayDownscalesAfterReadinessTimeout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "users.json")
-	if _, err := CreateInvite(path, "alice"); err != nil {
+	if _, err := authorization.CreateInvite(path, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if err := GrantService(path, "alice", Service{
+	if err := authorization.GrantService(path, "alice", authorization.Service{
 		Name: "postgres", Target: reserveTCPAddress(t),
-		Workload: &Workload{
+		Workload: &authorization.Workload{
 			Kind: "statefulset", Namespace: "dev-alice", Name: "postgres",
 			Replicas: 1, ReadyTimeout: 20 * time.Millisecond, IdleTimeout: time.Second,
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	credentials, err := LoadCredentials(path)
+	credentials, err := authorization.LoadCredentials(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,22 +166,22 @@ func (scaler *fakeScaler) Calls() []int32 {
 	return append([]int32(nil), scaler.calls...)
 }
 
-func credentialsWithWorkload(t *testing.T, target string) *Credentials {
+func credentialsWithWorkload(t *testing.T, target string) *authorization.Credentials {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "users.json")
-	if _, err := CreateInvite(path, "alice"); err != nil {
+	if _, err := authorization.CreateInvite(path, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if err := GrantService(path, "alice", Service{
+	if err := authorization.GrantService(path, "alice", authorization.Service{
 		Name: "postgres", Target: target, LocalPort: 5432,
-		Workload: &Workload{
+		Workload: &authorization.Workload{
 			Kind: "statefulset", Namespace: "dev-alice", Name: "postgres",
 			Replicas: 1, ReadyTimeout: time.Second, IdleTimeout: 20 * time.Millisecond,
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	credentials, err := LoadCredentials(path)
+	credentials, err := authorization.LoadCredentials(path)
 	if err != nil {
 		t.Fatal(err)
 	}

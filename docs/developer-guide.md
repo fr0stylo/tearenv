@@ -49,6 +49,8 @@ On Linux, the default profile is typically `~/.config/tearenv/config.json`. The 
 
 An invite can be redeemed only once. A successful login exchanges it for a personal token; it doesn't save the invite. Ask the operator for a new invite if login was completed on the wrong machine or the profile was lost.
 
+If the gateway uses Kubernetes-managed SSH keys, run `tearenv login --method kubernetes` instead. The command keeps the private key on your machine and registers only its public key. Follow [the authentication guide](authentication.md) for the required flags and Kubernetes permissions.
+
 ## See only your granted services
 
 Run:
@@ -115,7 +117,7 @@ tearenv services --config ~/.config/tearenv/staging.json
 tearenv connect --config ~/.config/tearenv/staging.json postgres
 ```
 
-`connect` can temporarily override the saved server, identity, token, or `known_hosts` path. `TEARENV_TOKEN` is used only when `--token` isn't set, and either value overrides the saved token. These overrides are useful for automation, but keeping tokens in environment variables can expose them to local process inspection or debug output.
+`connect` can temporarily override the saved server, identity, token, private key, or `known_hosts` path. `TEARENV_TOKEN` is used only when `--token` isn't set, and either value overrides the saved token. These overrides are useful for automation, but keeping tokens in environment variables can expose them to local process inspection or debug output.
 
 ## Expect cold starts and idle behavior
 

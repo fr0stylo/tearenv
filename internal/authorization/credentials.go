@@ -1,6 +1,7 @@
-package server
+package authorization
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -17,8 +18,6 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
-	"github.com/fr0stylo/tearenv/internal/scaler"
 )
 
 const minimumTokenLength = 16
@@ -40,14 +39,6 @@ type Workload struct {
 	Replicas     int32
 	ReadyTimeout time.Duration
 	IdleTimeout  time.Duration
-}
-
-func (workload Workload) scalerTarget() scaler.Target {
-	return scaler.Target{
-		Kind:      workload.Kind,
-		Namespace: workload.Namespace,
-		Name:      workload.Name,
-	}
 }
 
 // Credentials authenticates users and persists one-time enrollment invites.
@@ -181,24 +172,20 @@ func GrantService(path, identity string, service Service) error {
 	if err != nil {
 		return err
 	}
-	document, err := readCredentialsFile(path)
-	if err != nil {
-		return err
-	}
-	users, invites, _, err := parseCredentials(document)
-	if err != nil {
-		return err
-	}
-	_, registered := users[identity]
-	invited := false
-	for _, invitedIdentity := range invites {
-		if invitedIdentity == identity {
-			invited = true
-			break
+	document := credentialsFile{Users: make(map[string]credentialRecord)}
+	users := make(map[string][sha256.Size]byte)
+	if _, statErr := os.Stat(path); statErr == nil {
+		loaded, err := readCredentialsFile(path)
+		if err != nil {
+			return err
 		}
-	}
-	if !registered && !invited {
-		return fmt.Errorf("identity %q must be registered or invited before granting services", identity)
+		document = loaded
+		users, _, _, err = parseCredentials(document)
+		if err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("stat credentials file %q: %w", path, statErr)
 	}
 	if document.Access == nil {
 		document.Access = make(map[string]accessRecord)
@@ -220,13 +207,25 @@ func GrantService(path, identity string, service Service) error {
 	return writeCredentialsFile(path, document)
 }
 
-// Authenticate reports whether token belongs to identity.
-func (credentials *Credentials) Authenticate(identity, token string) bool {
+// AuthenticateToken reports whether token belongs to identity.
+func (credentials *Credentials) AuthenticateToken(identity, token string) bool {
 	credentials.mu.RLock()
 	defer credentials.mu.RUnlock()
 	expected, exists := credentials.users[identity]
 	provided := sha256.Sum256([]byte(token))
 	return subtle.ConstantTimeCompare(provided[:], expected[:]) == 1 && exists
+}
+
+// Authenticate implements the token authentication provider.
+func (credentials *Credentials) Authenticate(_ context.Context, attempt Attempt) (Result, bool, error) {
+	if attempt.Method != MethodPassword {
+		return Result{}, false, nil
+	}
+	authenticated := credentials.AuthenticateToken(attempt.Identity, attempt.Password)
+	if !authenticated {
+		return Result{}, false, nil
+	}
+	return Result{Identity: attempt.Identity, Provider: "token"}, true, nil
 }
 
 // AuthenticateInvite checks a one-time invite, reloading file-backed state so
@@ -350,8 +349,8 @@ func readCredentialsFile(path string) (credentialsFile, error) {
 }
 
 func parseCredentials(document credentialsFile) (map[string][sha256.Size]byte, map[string]string, map[string]map[string]Service, error) {
-	if len(document.Users) == 0 && len(document.Invites) == 0 {
-		return nil, nil, nil, errors.New("credentials must contain at least one user or invite")
+	if len(document.Users) == 0 && len(document.Invites) == 0 && len(document.Access) == 0 {
+		return nil, nil, nil, errors.New("authorization store must contain at least one user, invite, or access grant")
 	}
 	users := make(map[string][sha256.Size]byte, len(document.Users))
 	for identity, record := range document.Users {

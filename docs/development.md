@@ -8,17 +8,20 @@ The repository is a Go module with no generated application code. Keep client, s
 cmd/tearenv/         developer CLI
 cmd/tearenvd/        gateway and administrative CLI
 internal/client/     enrollment, catalog, SSH connection, and local listeners
+internal/authorization/ authentication providers, credentials, invites, and service policy
 internal/profile/    protected client profile persistence
 internal/protocol/   shared SSH request names and public catalog types
-internal/server/     credentials, authorization, host keys, proxy channels, and lifecycle
+internal/server/     SSH transport, host keys, proxy channels, and lifecycle
 internal/scaler/     backend-neutral scale interface
-internal/kube/       in-cluster Kubernetes scaler
+internal/kube/       in-cluster scaler and authorized-key Secret updates
 internal/proxy/      bidirectional stream copying
 e2e/                 compiled-binary and Kind scenarios
 deploy/kubernetes/   example scaler RBAC
 ```
 
-The main extension point is `scaler.Backend`. A new runtime backend receives a workload kind, namespace-like scope, name, and replica count. The lifecycle gateway owns connection tracking, readiness polling, and idle timers independently of the backend.
+Authentication providers implement `authorization.Authenticator` and can be composed with `authorization.NewChain`. A provider verifies one credential method and returns the verified identity. The server rejects a provider result that doesn't match the requested SSH identity. Service grants remain independent through `authorization.Policy`.
+
+Runtime backends implement `scaler.Backend`. A new backend receives a workload kind, namespace-like scope, name, and replica count. The lifecycle gateway owns connection tracking, readiness polling, and idle timers independently of the backend.
 
 ## Run the standard checks
 
@@ -62,7 +65,7 @@ The test prints the retained kubectl context. Without that variable, cleanup del
 
 ## Add behavior with focused tests
 
-Credential and policy changes belong in `internal/server/credentials_test.go`. Lifecycle timing and shared-workload activity belong in `internal/server/lifecycle_test.go`. Kubernetes API behavior belongs in `internal/kube/scaler_test.go`, which uses injected clients. Client/server integration belongs in `internal/client/integration_test.go`; binary behavior belongs in `e2e/e2e_test.go`.
+Authentication, credential, and policy changes belong in `internal/authorization`. Lifecycle timing and shared-workload activity belong in `internal/server/lifecycle_test.go`. Kubernetes API behavior belongs in `internal/kube`, which uses injected clients. Client/server integration belongs in `internal/client/integration_test.go`; binary behavior belongs in `e2e/e2e_test.go`.
 
 Use short idle and readiness durations only in tests. Production defaults and examples should remain realistic and shouldn't make correctness depend on tight scheduler timing.
 

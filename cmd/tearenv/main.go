@@ -17,6 +17,7 @@ import (
 	"syscall"
 
 	"github.com/fr0stylo/tearenv/internal/client"
+	"github.com/fr0stylo/tearenv/internal/kube"
 	"github.com/fr0stylo/tearenv/internal/profile"
 	"github.com/fr0stylo/tearenv/internal/protocol"
 	"github.com/spf13/cobra"
@@ -25,11 +26,17 @@ import (
 )
 
 type loginOptions struct {
+	method         string
 	serverAddress  string
 	identity       string
 	invite         string
+	privateKeyPath string
 	profilePath    string
 	knownHostsPath string
+	kubeconfig     string
+	kubeContext    string
+	kubeNamespace  string
+	kubeSecret     string
 	insecure       bool
 }
 
@@ -39,6 +46,7 @@ type connectOptions struct {
 	serverAddress  string
 	identity       string
 	token          string
+	privateKeyPath string
 	knownHostsPath string
 	insecure       bool
 }
@@ -76,15 +84,19 @@ func newRootCommand() *cobra.Command {
 
 func newLoginCommand() *cobra.Command {
 	options := loginOptions{
+		method:         "token",
 		serverAddress:  client.DefaultServerAddress,
 		identity:       defaultIdentity(),
 		invite:         os.Getenv("TEARENV_INVITE"),
 		profilePath:    defaultProfilePath(),
 		knownHostsPath: defaultKnownHostsPath(),
+		privateKeyPath: defaultPrivateKeyPath(),
+		kubeNamespace:  "tearenv-system",
+		kubeSecret:     "tearenv-authorized-keys",
 	}
 	command := &cobra.Command{
 		Use:   "login",
-		Short: "Redeem a one-time invite and save a local profile",
+		Short: "Authenticate and save a local profile",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			command.SilenceUsage = true
@@ -92,11 +104,17 @@ func newLoginCommand() *cobra.Command {
 		},
 	}
 	flags := command.Flags()
+	flags.StringVar(&options.method, "method", options.method, "login method (token or kubernetes)")
 	flags.StringVar(&options.serverAddress, "server", options.serverAddress, "SSH tunnel server")
 	flags.StringVar(&options.identity, "identity", options.identity, "developer identity from the invite")
 	flags.StringVar(&options.invite, "invite", options.invite, "one-time invite (or TEARENV_INVITE)")
+	flags.StringVar(&options.privateKeyPath, "private-key", options.privateKeyPath, "local SSH private key for Kubernetes login")
 	flags.StringVar(&options.profilePath, "config", options.profilePath, "local profile destination")
 	flags.StringVar(&options.knownHostsPath, "known-hosts", options.knownHostsPath, "SSH known_hosts file")
+	flags.StringVar(&options.kubeconfig, "kubeconfig", "", "kubeconfig used to register the public key")
+	flags.StringVar(&options.kubeContext, "kubernetes-context", "", "kubeconfig context used to register the public key")
+	flags.StringVar(&options.kubeNamespace, "kubernetes-namespace", options.kubeNamespace, "namespace containing the authorized keys Secret")
+	flags.StringVar(&options.kubeSecret, "kubernetes-secret", options.kubeSecret, "authorized keys Secret name")
 	flags.BoolVar(&options.insecure, "insecure-skip-host-key-check", false, "disable host identity verification (development only)")
 	return command
 }
@@ -108,22 +126,43 @@ func login(ctx context.Context, options loginOptions) error {
 	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	token, err := client.Enroll(ctx, client.EnrollmentConfig{
+	saved := profile.Profile{
 		ServerAddress: options.serverAddress,
 		Identity:      options.identity,
-		Invite:        options.invite,
-		HostKey:       hostKey,
-	})
-	if err != nil {
-		return err
-	}
-	if err := profile.Save(options.profilePath, profile.Profile{
-		ServerAddress: options.serverAddress,
-		Identity:      options.identity,
-		Token:         token,
 		KnownHosts:    options.knownHostsPath,
 		Insecure:      options.insecure,
-	}); err != nil {
+	}
+	switch strings.ToLower(strings.TrimSpace(options.method)) {
+	case "token":
+		token, err := client.Enroll(ctx, client.EnrollmentConfig{
+			ServerAddress: options.serverAddress,
+			Identity:      options.identity,
+			Invite:        options.invite,
+			HostKey:       hostKey,
+		})
+		if err != nil {
+			return err
+		}
+		saved.Token = token
+	case "kubernetes":
+		signer, err := client.LoadOrCreatePrivateKey(options.privateKeyPath, options.identity)
+		if err != nil {
+			return err
+		}
+		if err := kube.RegisterAuthorizedKey(ctx, kube.AuthorizedKeyOptions{
+			Kubeconfig: options.kubeconfig,
+			Context:    options.kubeContext,
+			Namespace:  options.kubeNamespace,
+			Secret:     options.kubeSecret,
+			Identity:   options.identity,
+		}, signer.PublicKey()); err != nil {
+			return fmt.Errorf("register public key: %w", err)
+		}
+		saved.PrivateKey = options.privateKeyPath
+	default:
+		return fmt.Errorf("unsupported login method %q", options.method)
+	}
+	if err := profile.Save(options.profilePath, saved); err != nil {
 		return fmt.Errorf("save login: %w", err)
 	}
 	slog.Info("login saved", "identity", options.identity, "server", options.serverAddress, "config", options.profilePath)
@@ -154,12 +193,11 @@ func services(ctx context.Context, options servicesOptions, output io.Writer) er
 	if err != nil {
 		return err
 	}
-	catalog, err := client.ListServices(ctx, client.ServiceClientConfig{
-		ServerAddress: saved.ServerAddress,
-		Identity:      saved.Identity,
-		Token:         saved.Token,
-		HostKey:       hostKey,
-	})
+	clientConfig, err := serviceClientConfig(saved, hostKey)
+	if err != nil {
+		return err
+	}
+	catalog, err := client.ListServices(ctx, clientConfig)
 	if err != nil {
 		return err
 	}
@@ -190,6 +228,7 @@ func newConnectCommand() *cobra.Command {
 	flags.StringVar(&options.serverAddress, "server", "", "override the saved SSH server")
 	flags.StringVar(&options.identity, "identity", "", "override the saved identity")
 	flags.StringVar(&options.token, "token", options.token, "override the saved token (or TEARENV_TOKEN)")
+	flags.StringVar(&options.privateKeyPath, "private-key", "", "override the saved SSH private key")
 	flags.StringVar(&options.knownHostsPath, "known-hosts", "", "override the saved known_hosts file")
 	flags.BoolVar(&options.insecure, "insecure-skip-host-key-check", false, "disable host identity verification (development only)")
 	return command
@@ -209,6 +248,9 @@ func connect(ctx context.Context, options connectOptions, specifications []strin
 	if options.token != "" {
 		saved.Token = options.token
 	}
+	if options.privateKeyPath != "" {
+		saved.PrivateKey = options.privateKeyPath
+	}
 	if options.knownHostsPath != "" {
 		saved.KnownHosts = options.knownHostsPath
 	}
@@ -219,11 +261,9 @@ func connect(ctx context.Context, options connectOptions, specifications []strin
 	if err != nil {
 		return err
 	}
-	clientConfig := client.ServiceClientConfig{
-		ServerAddress: saved.ServerAddress,
-		Identity:      saved.Identity,
-		Token:         saved.Token,
-		HostKey:       hostKey,
+	clientConfig, err := serviceClientConfig(saved, hostKey)
+	if err != nil {
+		return err
 	}
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -305,4 +345,29 @@ func defaultProfilePath() string {
 		return ".tearenv.json"
 	}
 	return filepath.Join(directory, "tearenv", "config.json")
+}
+
+func defaultPrivateKeyPath() string {
+	directory, err := os.UserConfigDir()
+	if err != nil {
+		return ".tearenv_id_ed25519"
+	}
+	return filepath.Join(directory, "tearenv", "id_ed25519")
+}
+
+func serviceClientConfig(saved *profile.Profile, hostKey ssh.HostKeyCallback) (client.ServiceClientConfig, error) {
+	config := client.ServiceClientConfig{
+		ServerAddress: saved.ServerAddress,
+		Identity:      saved.Identity,
+		Token:         saved.Token,
+		HostKey:       hostKey,
+	}
+	if saved.PrivateKey != "" {
+		signer, err := client.LoadPrivateKey(saved.PrivateKey)
+		if err != nil {
+			return client.ServiceClientConfig{}, err
+		}
+		config.Signer = signer
+	}
+	return config, nil
 }

@@ -12,7 +12,8 @@ import (
 type Profile struct {
 	ServerAddress string `json:"server"`
 	Identity      string `json:"identity"`
-	Token         string `json:"token"`
+	Token         string `json:"token,omitempty"`
+	PrivateKey    string `json:"private_key,omitempty"`
 	KnownHosts    string `json:"known_hosts,omitempty"`
 	Insecure      bool   `json:"insecure_skip_host_key_check,omitempty"`
 }
@@ -82,8 +83,8 @@ func (profile Profile) validate() error {
 	if profile.Identity == "" {
 		return errors.New("identity is required")
 	}
-	if profile.Token == "" {
-		return errors.New("token is required")
+	if profile.Token == "" && profile.PrivateKey == "" {
+		return errors.New("token or private key is required")
 	}
 	if !profile.Insecure && profile.KnownHosts == "" {
 		return errors.New("known-hosts path is required")

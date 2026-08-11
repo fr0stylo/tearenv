@@ -58,6 +58,8 @@ tearenv connect
 
 Applications can now use the displayed localhost ports.
 
+Token invites are the default authentication method. Kubernetes deployments can instead keep a generated private key on the developer machine and register only its public key in a mounted Secret. See [choose an authentication method](docs/authentication.md).
+
 ## Read the documentation
 
 Start with the [documentation index](docs/README.md), or go directly to the [local walkthrough](docs/getting-started.md), [developer guide](docs/developer-guide.md), [operator guide](docs/operator-guide.md), or [troubleshooting guide](docs/troubleshooting.md).

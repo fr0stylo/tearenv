@@ -7,10 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/fr0stylo/tearenv/internal/authorization"
 	"github.com/fr0stylo/tearenv/internal/client"
 	"github.com/fr0stylo/tearenv/internal/server"
 	"golang.org/x/crypto/ssh"
@@ -19,16 +21,16 @@ import (
 func TestIdentityAuthorizedService(t *testing.T) {
 	target := startEchoServer(t)
 	credentialsPath := filepath.Join(t.TempDir(), "users.json")
-	invite, err := server.CreateInvite(credentialsPath, "alice")
+	invite, err := authorization.CreateInvite(credentialsPath, "alice")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := server.GrantService(credentialsPath, "alice", server.Service{
+	if err := authorization.GrantService(credentialsPath, "alice", authorization.Service{
 		Name: "redis", Target: target, LocalPort: 6379,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	credentials, err := server.LoadCredentials(credentialsPath)
+	credentials, err := authorization.LoadCredentials(credentialsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +41,9 @@ func TestIdentityAuthorizedService(t *testing.T) {
 
 	signer := newSigner(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	gateway, err := server.New(server.Config{Credentials: credentials, Signer: signer, Logger: logger})
+	gateway, err := server.New(server.Config{
+		Authenticator: credentials, Enrollment: credentials, Policy: credentials, Signer: signer, Logger: logger,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +86,66 @@ func TestIdentityAuthorizedService(t *testing.T) {
 		t.Fatal("timed out waiting for local service")
 	}
 	assertEcho(t, local.String(), "hello through redis service")
+}
+
+func TestPublicKeyIdentityListsAuthorizedServices(t *testing.T) {
+	policyPath := filepath.Join(t.TempDir(), "access.json")
+	if err := authorization.GrantService(policyPath, "alice", authorization.Service{
+		Name: "redis", Target: "redis.dev.svc:6379", LocalPort: 6379,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := authorization.LoadCredentials(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientSigner := newSigner(t)
+	contents, err := authorization.UpsertPublicKey(nil, "alice", clientSigner.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keysPath := filepath.Join(t.TempDir(), authorization.PublicKeysDataKey)
+	if err := os.WriteFile(keysPath, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := authorization.LoadPublicKeys(keysPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := authorization.NewChain(keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostSigner := newSigner(t)
+	gateway, err := server.New(server.Config{
+		Authenticator: authenticator,
+		Policy:        policy,
+		Signer:        hostSigner,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = gateway.Serve(ctx, listener) }()
+
+	catalog, err := client.ListServices(ctx, client.ServiceClientConfig{
+		ServerAddress: listener.Addr().String(),
+		Identity:      "alice",
+		Signer:        clientSigner,
+		HostKey:       ssh.FixedHostKey(hostSigner.PublicKey()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog) != 1 || catalog[0].Name != "redis" {
+		t.Fatalf("catalog = %#v, want redis", catalog)
+	}
 }
 
 func newSigner(t *testing.T) ssh.Signer {

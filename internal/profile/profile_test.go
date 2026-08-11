@@ -43,3 +43,25 @@ func TestLoadRejectsOpenPermissions(t *testing.T) {
 		t.Fatal("Load() accepted group/world-readable profile")
 	}
 }
+
+func TestSaveAndLoadPrivateKeyProfile(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	want := Profile{
+		ServerAddress: "tunnel.example.com:2222",
+		Identity:      "alice",
+		PrivateKey:    "/home/alice/.config/tearenv/id_ed25519",
+		KnownHosts:    "/home/alice/.ssh/known_hosts",
+	}
+	if err := Save(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *got != want {
+		t.Fatalf("Load() = %#v, want %#v", *got, want)
+	}
+}

@@ -66,6 +66,15 @@ Check the saved `server` and `identity`, then ask the operator whether a new inv
 
 Temporary `--identity`, `--token`, `TEARENV_TOKEN`, and `--server` overrides can also create a mismatched identity/token pair. Remove the overrides and retry with the saved profile.
 
+For Kubernetes public-key login, confirm the profile's `private_key` exists with mode `0600`, the gateway uses `--authorized-keys`, and the mounted document contains the same identity and public key. Secret volume updates can take time to reach the pod. The gateway logs `provider=public-key` after a successful key login.
+
+If public-key registration fails, check the selected kubeconfig context and permission on the exact Secret:
+
+```sh
+kubectl auth can-i get secret/tearenv-authorized-keys -n tearenv-system
+kubectl auth can-i update secret/tearenv-authorized-keys -n tearenv-system
+```
+
 ## Fix service selection and local listeners
 
 ### `service ... is not granted to this identity`
@@ -105,6 +114,8 @@ Create the first invite with the same `--users` path before starting `serve`:
 ```sh
 tearenvd invite --users /var/lib/tearenv/users.json --identity alice
 ```
+
+For external authentication, create the policy file with `tearenvd service grant` instead.
 
 ### Credential permissions are rejected
 

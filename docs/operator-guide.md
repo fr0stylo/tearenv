@@ -1,6 +1,6 @@
 # Run tearenvd
 
-`tearenvd` combines an SSH gateway with administrative commands for invites and service grants. Use one protected credential file and one stable SSH host key for a gateway deployment.
+`tearenvd` combines an SSH gateway with administrative commands for invites and service grants. Use one protected policy file and one stable SSH host key for a gateway deployment. Authentication can use invite-issued tokens, Kubernetes-managed public keys, or both.
 
 ## Build and prepare storage
 
@@ -19,7 +19,7 @@ The default state paths are relative to the process working directory:
 
 Use explicit absolute paths in a service manager or container. The credential file must be writable during invite redemption because enrollment consumes an invite and persists a new token hash. Both files contain security-sensitive state and should be readable only by the gateway account.
 
-## Create an invite before starting a new gateway
+## Create authentication or policy before starting a new gateway
 
 A new credential file is created by the first invite:
 
@@ -29,11 +29,11 @@ INVITE=$(./bin/tearenvd invite \
   --identity alice)
 ```
 
-`tearenvd serve` won't start with a missing or empty credential file. The identity must match `^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$`.
+`tearenvd serve` won't start with a missing or empty policy file. Token deployments can create the file with an invite. External-authentication deployments can create it with the first `service grant`. The identity must match `^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$`.
 
 Only a hash of the invite is stored. Creating another invite for the same identity invalidates its previous pending invite. If the identity is already registered, its current personal token keeps working until the new invite is redeemed; successful redemption rotates the personal token.
 
-Send the plaintext invite through a protected channel. It is a bearer secret until redeemed.
+Send the plaintext invite through a protected channel. It is a bearer secret until redeemed. Skip the invite when the identity will use an external authentication provider such as the Kubernetes public-key flow.
 
 ## Grant a static service
 
@@ -68,6 +68,8 @@ Run:
 If the host key doesn't exist, `tearenvd` creates a persistent Ed25519 private key with mode `0600`. Back it up and mount it persistently. Replacing the key triggers host-key warnings for every existing client and must be communicated as a deliberate rotation.
 
 The startup log reports the bound address, credential path, scaler name, and public-key fingerprint. Publish the fingerprint through a trusted channel so developers can verify it before login.
+
+To enable SSH public keys from a mounted Kubernetes Secret, pass `--authorized-keys` with the mounted `authorized_keys.json` path. Follow [the authentication guide](authentication.md) for the Secret format, client registration command, and required security controls.
 
 The process handles `SIGINT` and `SIGTERM`. On shutdown it closes the SSH listener and attempts to scale down workloads started by that process, allowing up to 30 seconds for each scaler call.
 

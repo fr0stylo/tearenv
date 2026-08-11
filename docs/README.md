@@ -7,6 +7,7 @@ Start with the guide that matches what you're doing:
 - [Understand why tearenv exists](overview.md) explains the problem, trust boundary, architecture, and connection lifecycle.
 - [Try tearenv locally](getting-started.md) walks through a complete local setup from build to first proxied request.
 - [Use tearenv as a developer](developer-guide.md) covers login, service discovery, local port selection, profiles, and day-to-day use.
+- [Choose an authentication method](authentication.md) covers invite tokens, Kubernetes-managed public keys, security constraints, and the OIDC extension point.
 - [Run tearenvd](operator-guide.md) covers identities, grants, static services, Kubernetes scaling, storage, and operations.
 - [Look up commands and file formats](reference.md) documents every CLI option, environment variable, default, naming rule, and data file.
 - [Diagnose a problem](troubleshooting.md) maps common errors and symptoms to checks and fixes.
@@ -26,6 +27,6 @@ The repository builds two binaries:
 
 ## Check the current limitations
 
-The current CLI can create or replace invites and create or replace service grants. It doesn't include commands to list identities, revoke an identity, remove a grant, or inspect the credential store. Treat `.data/users.json` as protected application state, back it up, and use a controlled maintenance procedure if you need to remove records manually.
+The current CLI can create or replace invites, register Kubernetes public keys, and create or replace service grants. It doesn't include commands to list identities, remove a public key, revoke an identity, remove a grant, or inspect the policy store. Treat `.data/users.json` as protected application state, back it up, and use a controlled maintenance procedure if you need to remove records manually.
 
 Only the Kubernetes scaler is included. Static targets need no scaler. Docker, containerd, and other runtimes would require another implementation of the scaler interface.

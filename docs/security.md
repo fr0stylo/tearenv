@@ -13,6 +13,7 @@ The gateway is a privileged policy enforcement point. It can reach every configu
 The SSH server enables only the application protocol needed by tearenv:
 
 - Password authentication carries the invite or personal token inside SSH.
+- Public-key authentication proves possession of an identity-bound private key.
 - Enrollment requests can exchange a valid one-time invite for a personal token.
 - Catalog requests return aliases and suggested local ports.
 - Direct TCP channels accept a granted alias with port zero.
@@ -36,6 +37,12 @@ One-time invites and personal tokens are bearer secrets tied to an identity. Sen
 The server persists SHA256 hashes of invites and tokens. The client must retain its plaintext token to authenticate, so its profile is more sensitive than the hash-only server record. Both client and server reject their JSON file when group or world permission bits are present.
 
 Issuing a replacement invite doesn't immediately revoke an existing token. Redemption rotates the token. For immediate incident response, stop the gateway, remove the compromised identity and its access from a protected backup-derived credential document, preserve mode `0600`, and restart. The current CLI doesn't provide a revoke command.
+
+## Keep SSH private keys off the cluster
+
+Kubernetes login stores only public keys in the cluster and keeps the generated private key in an owner-only local file. Back up or rotate that local key according to your endpoint policy. Don't copy it into a Kubernetes Secret, container image, ticket, or shared profile.
+
+Write access to the authorized-keys Secret is equivalent to tearenv identity administration. A writer can insert a key for any identity in the document. Restrict updates to an operator workflow or enforce the Kubernetes-to-tearenv identity mapping with admission policy. Kubernetes cluster access by itself doesn't prove which tearenv identity a caller should receive.
 
 ## Keep local listeners private
 

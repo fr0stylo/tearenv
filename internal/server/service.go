@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/fr0stylo/tearenv/internal/authorization"
 	"github.com/fr0stylo/tearenv/internal/protocol"
 	"github.com/fr0stylo/tearenv/internal/proxy"
 	gliderssh "github.com/gliderlabs/ssh"
@@ -27,8 +28,8 @@ var ErrServiceDenied = errors.New("service access denied")
 // A backend implementation can scale a workload while this boundary waits for
 // readiness, dials it, and tracks idleness without changing the SSH protocol.
 type ServiceGateway interface {
-	Services(ctx context.Context, identity string) ([]Service, error)
-	Open(ctx context.Context, identity, name string) (net.Conn, Service, error)
+	Services(ctx context.Context, identity string) ([]authorization.Service, error)
+	Open(ctx context.Context, identity, name string) (net.Conn, authorization.Service, error)
 }
 
 func serviceCatalogHandler(gateway ServiceGateway, logger *slog.Logger) gliderssh.RequestHandler {
