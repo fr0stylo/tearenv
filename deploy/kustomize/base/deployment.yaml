@@ -1,0 +1,94 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tearenvd
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  template:
+    spec:
+      serviceAccountName: tearenvd
+      securityContext:
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: initialize-state
+          image: busybox:1.37
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              umask 077
+              if [ ! -s /var/lib/tearenv/users.json ]; then
+                cp /bootstrap/users.json /var/lib/tearenv/users.json
+              fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsGroup: 65532
+            runAsNonRoot: true
+            runAsUser: 65532
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/tearenv
+      containers:
+        - name: tearenvd
+          image: ghcr.io/fr0stylo/tearenv:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+            - --listen=:2222
+            - --users=/var/lib/tearenv/users.json
+            - --host-key=/var/lib/tearenv/ssh_host_ed25519_key
+            - --scaler=kubernetes
+          ports:
+            - name: ssh
+              containerPort: 2222
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: ssh
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: ssh
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsGroup: 65532
+            runAsNonRoot: true
+            runAsUser: 65532
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/tearenv
+      volumes:
+        - name: bootstrap
+          secret:
+            secretName: tearenvd-bootstrap
+            defaultMode: 0440
+            items:
+              - key: users.json
+                path: users.json
+        - name: state
+          persistentVolumeClaim:
+            claimName: tearenvd-state

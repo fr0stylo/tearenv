@@ -16,7 +16,9 @@ internal/scaler/     backend-neutral scale interface
 internal/kube/       in-cluster scaler and authorized-key Secret updates
 internal/proxy/      bidirectional stream copying
 e2e/                 compiled-binary and Kind scenarios
-deploy/kubernetes/   example scaler RBAC
+deploy/helm/         installable Helm chart
+deploy/kustomize/    Kustomize base and overlays
+deploy/kubernetes/   minimal scaler RBAC example
 ```
 
 Authentication providers implement `authorization.Authenticator` and can be composed with `authorization.NewChain`. A provider verifies one credential method and returns the verified identity. The server rejects a provider result that doesn't match the requested SSH identity. Service grants remain independent through `authorization.Policy`.
@@ -41,9 +43,12 @@ make test-race
 make vet
 make build
 make e2e
+make manifests
 ```
 
 `make e2e` compiles both programs and verifies invite redemption, identity authentication, catalog authorization, local forwarding, invite single use, and cross-identity rejection.
+
+`make manifests` lints and renders the Helm chart and every Kustomize overlay. Docker image construction is also checked in CI.
 
 ## Run the Kubernetes lifecycle test
 

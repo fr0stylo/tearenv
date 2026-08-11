@@ -76,6 +76,26 @@ jobs:
       - name: Build tearenv and tearenvd
         run: make build
 
+  deployment:
+    name: Deployment assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.2.0
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v5
+        with:
+          version: v1.36.2
+      - name: Render Helm and Kustomize manifests
+        run: make manifests
+      - name: Build the gateway image
+        run: docker build --tag tearenv:ci .
+
   e2e:
     name: Binary E2E
     runs-on: ubuntu-latest
@@ -108,8 +128,8 @@ jobs:
           GOFLAGS: ""
         run: go install sigs.k8s.io/kind@v0.32.0
       - name: Install kubectl
-        uses: azure/setup-kubectl@v4
+        uses: azure/setup-kubectl@v5
         with:
-          version: v1.36.1
+          version: v1.36.2
       - name: Run Kubernetes E2E
         run: make e2e-kind

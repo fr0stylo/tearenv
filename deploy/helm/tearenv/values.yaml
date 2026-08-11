@@ -1,0 +1,85 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/fr0stylo/tearenv
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 2222
+  annotations: {}
+
+bootstrap:
+  # Use existingSecret for production so policy data is not stored in Helm release values.
+  existingSecret: ""
+  secretKey: users.json
+  policy: |
+    {
+      "access": {
+        "configure-me": {
+          "services": {}
+        }
+      }
+    }
+
+publicKeys:
+  # Set this to a Secret containing a nonempty authorized_keys.json document.
+  existingSecret: ""
+  secretKey: authorized_keys.json
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  keep: true
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  annotations: {}
+
+scaler:
+  kubernetes:
+    enabled: true
+  rbac:
+    create: true
+    # Namespaced Roles are safer. An empty list grants access only in the release namespace.
+    namespaces: []
+    clusterWide: false
+
+initImage:
+  repository: busybox
+  tag: "1.37"
+  pullPolicy: IfNotPresent
+
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  fsGroup: 65532
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsGroup: 65532
+  runAsNonRoot: true
+  runAsUser: 65532
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,14 @@
+tearenvd is installed as {{ include "tearenv.fullname" . }} in {{ .Release.Namespace }}.
+
+Wait for the gateway:
+  kubectl rollout status deployment/{{ include "tearenv.fullname" . }} -n {{ .Release.Namespace }}
+
+{{- if eq .Values.service.type "ClusterIP" }}
+For a local test, forward the SSH port:
+  kubectl port-forward service/{{ include "tearenv.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }} -n {{ .Release.Namespace }}
+{{- else }}
+Find the published endpoint:
+  kubectl get service/{{ include "tearenv.fullname" . }} -n {{ .Release.Namespace }}
+{{- end }}
+
+The default bootstrap policy grants no services. Add identities and grants before onboarding users.

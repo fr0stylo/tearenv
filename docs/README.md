@@ -9,6 +9,7 @@ Start with the guide that matches what you're doing:
 - [Use tearenv as a developer](developer-guide.md) covers login, service discovery, local port selection, profiles, and day-to-day use.
 - [Choose an authentication method](authentication.md) covers invite tokens, Kubernetes-managed public keys, security constraints, and the OIDC extension point.
 - [Run tearenvd](operator-guide.md) covers identities, grants, static services, Kubernetes scaling, storage, and operations.
+- [Deploy on Kubernetes](kubernetes-deployment.md) covers the container image, Helm chart, Kustomize overlays, persistence, and scaler RBAC.
 - [Look up commands and file formats](reference.md) documents every CLI option, environment variable, default, naming rule, and data file.
 - [Diagnose a problem](troubleshooting.md) maps common errors and symptoms to checks and fixes.
 - [Review the security model](security.md) explains what tearenv permits, what it blocks, and how to deploy it safely.

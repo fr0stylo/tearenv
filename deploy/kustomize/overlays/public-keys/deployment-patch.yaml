@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tearenvd
+spec:
+  template:
+    spec:
+      containers:
+        - name: tearenvd
+          args:
+            - serve
+            - --listen=:2222
+            - --users=/var/lib/tearenv/users.json
+            - --host-key=/var/lib/tearenv/ssh_host_ed25519_key
+            - --scaler=kubernetes
+            - --authorized-keys=/etc/tearenv/authorized-keys/authorized_keys.json
+          volumeMounts:
+            - name: authorized-keys
+              mountPath: /etc/tearenv/authorized-keys
+              readOnly: true
+      volumes:
+        - name: authorized-keys
+          secret:
+            secretName: tearenv-authorized-keys
+            defaultMode: 0444
+            items:
+              - key: authorized_keys.json
+                path: authorized_keys.json

@@ -1,0 +1,129 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tearenv.fullname" . }}
+  labels:
+    {{- include "tearenv.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "tearenv.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tearenv.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "tearenv.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: initialize-state
+          image: "{{ .Values.initImage.repository }}:{{ .Values.initImage.tag }}"
+          imagePullPolicy: {{ .Values.initImage.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              umask 077
+              if [ ! -s /var/lib/tearenv/users.json ]; then
+                cp /bootstrap/{{ .Values.bootstrap.secretKey }} /var/lib/tearenv/users.json
+              fi
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/tearenv
+      containers:
+        - name: tearenvd
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - serve
+            - --listen=:2222
+            - --users=/var/lib/tearenv/users.json
+            - --host-key=/var/lib/tearenv/ssh_host_ed25519_key
+            {{- if .Values.scaler.kubernetes.enabled }}
+            - --scaler=kubernetes
+            {{- end }}
+            {{- if .Values.publicKeys.existingSecret }}
+            - --authorized-keys=/etc/tearenv/authorized-keys/{{ .Values.publicKeys.secretKey }}
+            {{- end }}
+          ports:
+            - name: ssh
+              containerPort: 2222
+              protocol: TCP
+          livenessProbe:
+            tcpSocket:
+              port: ssh
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: ssh
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: state
+              mountPath: /var/lib/tearenv
+            {{- if .Values.publicKeys.existingSecret }}
+            - name: authorized-keys
+              mountPath: /etc/tearenv/authorized-keys
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: bootstrap
+          secret:
+            secretName: {{ include "tearenv.bootstrapSecretName" . }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.bootstrap.secretKey }}
+                path: {{ .Values.bootstrap.secretKey }}
+        - name: state
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "tearenv.stateClaimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.publicKeys.existingSecret }}
+        - name: authorized-keys
+          secret:
+            secretName: {{ .Values.publicKeys.existingSecret }}
+            defaultMode: 0444
+            items:
+              - key: {{ .Values.publicKeys.secretKey }}
+                path: {{ .Values.publicKeys.secretKey }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

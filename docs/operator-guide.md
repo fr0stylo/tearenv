@@ -75,6 +75,8 @@ The process handles `SIGINT` and `SIGTERM`. On shutdown it closes the SSH listen
 
 ## Add Kubernetes scale-to-zero
 
+For a complete installation, use [the Helm or Kustomize deployment guide](kubernetes-deployment.md). The commands below explain the underlying scaler configuration.
+
 The Kubernetes backend uses in-cluster service-account credentials. It supports lowercase `deployment` and `statefulset` workload kinds and changes only each object's scale subresource.
 
 Create the namespace used by the supplied RBAC template, then apply it:

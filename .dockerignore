@@ -1,0 +1,10 @@
+.git
+.github
+.agents
+.codex
+.data
+bin
+docs
+e2e
+deploy
+*.md

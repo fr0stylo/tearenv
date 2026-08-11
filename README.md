@@ -19,6 +19,18 @@ make build
 
 This creates `bin/tearenv` and `bin/tearenvd`.
 
+## Deploy on Kubernetes
+
+The repository includes a production Dockerfile, Helm chart, and Kustomize overlays:
+
+```sh
+docker build -t registry.example.com/tearenv:0.1.0 .
+helm lint deploy/helm/tearenv
+kubectl kustomize deploy/kustomize/overlays/default
+```
+
+Follow [the Kubernetes deployment guide](docs/kubernetes-deployment.md) to prepare policy state, persistent storage, scaler permissions, public-key authentication, and an external SSH Service.
+
 ## Set up the gateway
 
 Create an identity and grant a service:

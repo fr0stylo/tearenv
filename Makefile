@@ -1,4 +1,4 @@
-.PHONY: build check e2e e2e-kind fmt lint test test-race vet
+.PHONY: build check e2e e2e-kind fmt lint manifests test test-race vet
 
 build:
 	mkdir -p bin
@@ -22,6 +22,14 @@ vet:
 
 lint:
 	go tool golangci-lint run
+
+manifests:
+	helm lint deploy/helm/tearenv
+	helm template tearenv deploy/helm/tearenv --namespace tearenv-system >/dev/null
+	kubectl kustomize deploy/kustomize/overlays/default >/dev/null
+	kubectl kustomize deploy/kustomize/overlays/load-balancer >/dev/null
+	kubectl kustomize deploy/kustomize/overlays/public-keys >/dev/null
+	kubectl kustomize deploy/kustomize/overlays/cluster-wide >/dev/null
 
 fmt:
 	gofmt -w $$(find cmd internal e2e -name '*.go')
