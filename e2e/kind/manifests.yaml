@@ -1,0 +1,183 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tearenvd
+  namespace: tearenv-e2e
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tearenvd-scaler
+  namespace: tearenv-e2e
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tearenvd-scaler
+  namespace: tearenv-e2e
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tearenvd-scaler
+subjects:
+  - kind: ServiceAccount
+    name: tearenvd
+    namespace: tearenv-e2e
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tearenvd
+  namespace: tearenv-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tearenvd
+  template:
+    metadata:
+      labels:
+        app: tearenvd
+    spec:
+      serviceAccountName: tearenvd
+      containers:
+        - name: tearenvd
+          image: TEARENV_KIND_IMAGE
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/tearenvd"]
+          args:
+            - serve
+            - -listen
+            - :2222
+            - -host-key
+            - /etc/tearenv/host_key
+            - -users
+            - /etc/tearenv/users.json
+            - -scaler
+            - kubernetes
+          ports:
+            - name: ssh
+              containerPort: 2222
+          readinessProbe:
+            tcpSocket:
+              port: ssh
+            periodSeconds: 1
+            timeoutSeconds: 1
+          volumeMounts:
+            - name: config
+              mountPath: /etc/tearenv
+              readOnly: true
+      volumes:
+        - name: config
+          secret:
+            secretName: tearenvd-config
+            defaultMode: 0400
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tearenvd
+  namespace: tearenv-e2e
+spec:
+  selector:
+    app: tearenvd
+  ports:
+    - name: ssh
+      port: 2222
+      targetPort: ssh
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: http-alice
+  namespace: tearenv-e2e
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: tearenv-kind-http-alice
+  template:
+    metadata:
+      labels:
+        app: tearenv-kind-http-alice
+    spec:
+      containers:
+        - name: http-server
+          image: TEARENV_KIND_IMAGE
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/http-server"]
+          env:
+            - name: TEARENV_HTTP_RESPONSE
+              value: alice workload
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 1
+            timeoutSeconds: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: http-alice
+  namespace: tearenv-e2e
+spec:
+  selector:
+    app: tearenv-kind-http-alice
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: http-bob
+  namespace: tearenv-e2e
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app: tearenv-kind-http-bob
+  template:
+    metadata:
+      labels:
+        app: tearenv-kind-http-bob
+    spec:
+      containers:
+        - name: http-server
+          image: TEARENV_KIND_IMAGE
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/http-server"]
+          env:
+            - name: TEARENV_HTTP_RESPONSE
+              value: bob workload
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 1
+            timeoutSeconds: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: http-bob
+  namespace: tearenv-e2e
+spec:
+  selector:
+    app: tearenv-kind-http-bob
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

@@ -1,0 +1,138 @@
+# Run tearenvd
+
+`tearenvd` combines an SSH gateway with administrative commands for invites and service grants. Use one protected credential file and one stable SSH host key for a gateway deployment.
+
+## Build and prepare storage
+
+Build both binaries:
+
+```sh
+make build
+```
+
+The default state paths are relative to the process working directory:
+
+```text
+.data/users.json
+.data/ssh_host_ed25519_key
+```
+
+Use explicit absolute paths in a service manager or container. The credential file must be writable during invite redemption because enrollment consumes an invite and persists a new token hash. Both files contain security-sensitive state and should be readable only by the gateway account.
+
+## Create an invite before starting a new gateway
+
+A new credential file is created by the first invite:
+
+```sh
+INVITE=$(./bin/tearenvd invite \
+  -users /var/lib/tearenv/users.json \
+  -identity alice)
+```
+
+`tearenvd serve` won't start with a missing or empty credential file. The identity must match `^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$`.
+
+Only a hash of the invite is stored. Creating another invite for the same identity invalidates its previous pending invite. If the identity is already registered, its current personal token keeps working until the new invite is redeemed; successful redemption rotates the personal token.
+
+Send the plaintext invite through a protected channel. It is a bearer secret until redeemed.
+
+## Grant a static service
+
+Grant an identity before or after it redeems the invite:
+
+```sh
+./bin/tearenvd service grant \
+  -users /var/lib/tearenv/users.json \
+  -identity alice \
+  -name grpc \
+  -target api-alice.dev-alice.svc.cluster.local:50051 \
+  -local-port 50051
+```
+
+A static service is expected to be running. `tearenvd` dials it once for each developer connection and returns a generic unavailable error if that dial fails.
+
+The alias must match `^[a-z][a-z0-9-]{0,31}$`. The target must be a reachable `host:port` from the gateway. When `-local-port` is omitted, it defaults to the target port.
+
+Grants are identity-bound and keyed by alias. Running the command again with the same identity and alias replaces that grant. The running gateway reloads grants when a client requests the catalog or opens a service, so a restart isn't required.
+
+## Start the gateway
+
+Run:
+
+```sh
+./bin/tearenvd serve \
+  -listen :2222 \
+  -users /var/lib/tearenv/users.json \
+  -host-key /var/lib/tearenv/ssh_host_ed25519_key
+```
+
+If the host key doesn't exist, `tearenvd` creates a persistent Ed25519 private key with mode `0600`. Back it up and mount it persistently. Replacing the key triggers host-key warnings for every existing client and must be communicated as a deliberate rotation.
+
+The startup log reports the bound address, credential path, scaler name, and public-key fingerprint. Publish the fingerprint through a trusted channel so developers can verify it before login.
+
+The process handles `SIGINT` and `SIGTERM`. On shutdown it closes the SSH listener and attempts to scale down workloads started by that process, allowing up to 30 seconds for each scaler call.
+
+## Add Kubernetes scale-to-zero
+
+The Kubernetes backend uses in-cluster service-account credentials. It supports lowercase `deployment` and `statefulset` workload kinds and changes only each object's scale subresource.
+
+Create the namespace used by the supplied RBAC template, then apply it:
+
+```sh
+kubectl create namespace tearenv-system
+kubectl apply -f deploy/kubernetes/rbac.yaml
+```
+
+The template creates a `tearenvd` service account in `tearenv-system` and a cluster-wide role for `get` and `update` on `deployments/scale` and `statefulsets/scale`. Bind a namespace-scoped Role instead if all managed workloads live in a known namespace.
+
+Run the pod with `serviceAccountName: tearenvd` and start the daemon with:
+
+```sh
+tearenvd serve \
+  -listen :2222 \
+  -users /var/lib/tearenv/users.json \
+  -host-key /var/lib/tearenv/ssh_host_ed25519_key \
+  -scaler kubernetes
+```
+
+The deprecated `-kubernetes` flag is equivalent to `-scaler kubernetes`. Don't set it together with a different scaler value.
+
+Grant a managed StatefulSet:
+
+```sh
+tearenvd service grant \
+  -users /var/lib/tearenv/users.json \
+  -identity alice \
+  -name postgres \
+  -target postgres.dev-alice.svc.cluster.local:5432 \
+  -local-port 5432 \
+  -workload-kind statefulset \
+  -workload-namespace dev-alice \
+  -workload-name postgres \
+  -replicas 1 \
+  -ready-timeout 2m \
+  -idle-timeout 10m
+```
+
+The namespace and workload name identify the scale subresource. The target remains the network endpoint that must accept TCP. tearenv doesn't inspect Kubernetes readiness conditions; after scaling, it attempts a one-second TCP dial every 500 milliseconds until `ready-timeout`.
+
+If multiple aliases belong to the same workload, give them the same workload kind, namespace, and name. tearenvd then shares active connection tracking and won't downscale until all aliases are idle.
+
+Static grants can coexist with scaled grants. Starting without `-scaler` keeps static services working, but every grant with workload metadata fails when a developer tries to connect.
+
+## Use writable persistent state in Kubernetes
+
+Mount the credential file from protected writable storage if developers will enroll through this gateway or administrators will update the file in place. A Kubernetes Secret volume is read-only, so invite authentication may succeed but enrollment can't consume the invite and write the personal token hash.
+
+A Secret volume is suitable only for a pre-provisioned, read-only credential document where enrollment and in-place administration are intentionally disabled. The Kind end-to-end fixture uses that model with precomputed test-token hashes; it isn't an onboarding pattern for production.
+
+Use a single writer for the credential file. Administrative commands use an atomic temporary-file rename, but two commands mutating separate copies or writing concurrently can still overwrite each other's changes. Back up the file before manual maintenance.
+
+## Operate the gateway safely
+
+Watch structured text logs for authentication rejection, service denial, scale operations, readiness failures, and downscale failures. Logs include identities, aliases, targets, and remote addresses, so treat log access as operationally sensitive.
+
+Probe the SSH TCP port for process readiness. A TCP probe confirms that the listener accepts connections; it doesn't validate credential storage, target reachability, or scaler permissions. Add separate synthetic checks for important services.
+
+The current process keeps lifecycle state in memory and doesn't coordinate scale timers across replicas. Run a single active replica for a workload set. If you need high availability, partition workloads so only one gateway manages each workload, or add external lifecycle coordination before running active-active replicas.
+
+Review [the security model](security.md) and [troubleshooting checks](troubleshooting.md) before exposing the gateway.

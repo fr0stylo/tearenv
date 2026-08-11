@@ -1,0 +1,31 @@
+# tearenv documentation
+
+`tearenv` gives developers local TCP ports for private development services without giving them private hostnames or general-purpose SSH forwarding. The `tearenvd` gateway authenticates each identity, decides which named services it can reach, and can start and stop Kubernetes workloads around active connections.
+
+Start with the guide that matches what you're doing:
+
+- [Understand why tearenv exists](overview.md) explains the problem, trust boundary, architecture, and connection lifecycle.
+- [Try tearenv locally](getting-started.md) walks through a complete local setup from build to first proxied request.
+- [Use tearenv as a developer](developer-guide.md) covers login, service discovery, local port selection, profiles, and day-to-day use.
+- [Run tearenvd](operator-guide.md) covers identities, grants, static services, Kubernetes scaling, storage, and operations.
+- [Look up commands and file formats](reference.md) documents every CLI option, environment variable, default, naming rule, and data file.
+- [Diagnose a problem](troubleshooting.md) maps common errors and symptoms to checks and fixes.
+- [Review the security model](security.md) explains what tearenv permits, what it blocks, and how to deploy it safely.
+- [Develop and test tearenv](development.md) covers the repository layout and test suites.
+
+## Know the two programs
+
+The repository builds two binaries:
+
+| Program    | Audience   | Purpose                                                                           |
+| ---------- | ---------- | --------------------------------------------------------------------------------- |
+| `tearenv`  | Developers | Redeems an invite, lists authorized services, and opens local TCP listeners.      |
+| `tearenvd` | Operators  | Runs the SSH gateway, manages invites, and grants identity-bound service aliases. |
+
+`tearenv` is not an SSH shell, VPN, or network overlay. It exposes only the aliases granted to the authenticated identity. `tearenvd` resolves those aliases to server-side targets that never appear in the client catalog.
+
+## Check the current limitations
+
+The current CLI can create or replace invites and create or replace service grants. It doesn't include commands to list identities, revoke an identity, remove a grant, or inspect the credential store. Treat `.data/users.json` as protected application state, back it up, and use a controlled maintenance procedure if you need to remove records manually.
+
+Only the Kubernetes scaler is included. Static targets need no scaler. Docker, containerd, and other runtimes would require another implementation of the scaler interface.
