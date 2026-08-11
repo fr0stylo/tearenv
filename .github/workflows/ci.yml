@@ -31,6 +31,21 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Run golangci-lint
+        run: go tool golangci-lint run
+
   test:
     name: Race tests
     runs-on: ubuntu-latest

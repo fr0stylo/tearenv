@@ -43,13 +43,13 @@ func NewScaler(client appsclient.AppsV1Interface) *Scaler {
 // Scale updates the workload's scale subresource through client-go.
 func (backend *Scaler) Scale(ctx context.Context, target scaler.Target, replicas int32) error {
 	if backend == nil || backend.client == nil {
-		return errors.New("Kubernetes client is required")
+		return errors.New("kubernetes client is required")
 	}
 	if target.Namespace == "" || target.Name == "" {
-		return errors.New("Kubernetes workload namespace and name are required")
+		return errors.New("kubernetes workload namespace and name are required")
 	}
 	if replicas < 0 {
-		return fmt.Errorf("Kubernetes workload replicas cannot be negative: %d", replicas)
+		return fmt.Errorf("kubernetes workload replicas cannot be negative: %d", replicas)
 	}
 
 	var workloads scaleClient

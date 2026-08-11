@@ -1,4 +1,4 @@
-.PHONY: build check e2e e2e-kind fmt test test-race vet
+.PHONY: build check e2e e2e-kind fmt lint test test-race vet
 
 build:
 	mkdir -p bin
@@ -20,7 +20,10 @@ e2e-kind:
 vet:
 	go vet ./...
 
+lint:
+	go tool golangci-lint run
+
 fmt:
 	gofmt -w $$(find cmd internal e2e -name '*.go')
 
-check: vet test-race build
+check: lint vet test-race build
