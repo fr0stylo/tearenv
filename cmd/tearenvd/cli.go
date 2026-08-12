@@ -7,11 +7,14 @@ import (
 )
 
 const (
-	defaultListenAddress  = ":2222"
-	defaultMetricsAddress = ":9090"
-	defaultHostKeyPath    = ".data/ssh_host_ed25519_key"
-	defaultUsersPath      = ".data/users.json"
-	defaultBlueprintName  = "developer-environment"
+	defaultListenAddress         = ":2222"
+	defaultAPIAddress            = "127.0.0.1:8080"
+	defaultMetricsAddress        = ":9090"
+	defaultHostKeyPath           = ".data/ssh_host_ed25519_key"
+	defaultUsersPath             = ".data/users.json"
+	defaultRegistrationsPath     = ".data/registrations"
+	defaultRegistrationNamespace = "default"
+	defaultBlueprintName         = "developer-environment"
 )
 
 type grantOptions struct {
@@ -28,24 +31,21 @@ type grantOptions struct {
 	idleTimeout       time.Duration
 }
 
-type inviteOptions struct {
-	usersPath string
-	identity  string
-}
-
 type blueprintInitOptions struct {
 	name string
 }
 
 type serveOptions struct {
-	listenAddress      string
-	metricsAddress     string
-	hostKeyPath        string
-	usersPath          string
-	authorizedKeysPath string
-	blueprintPath      string
-	scalerName         string
-	kubernetes         bool
+	listenAddress         string
+	apiAddress            string
+	metricsAddress        string
+	hostKeyPath           string
+	usersPath             string
+	registrationsPath     string
+	registrationNamespace string
+	blueprintPath         string
+	scalerName            string
+	kubernetes            bool
 }
 
 func run(arguments []string) error {
@@ -63,7 +63,6 @@ func newRootCommand() *cobra.Command {
 	}
 	command.AddCommand(
 		newServeCommand(),
-		newInviteCommand(),
 		newServiceCommand(),
 		newBlueprintCommand(),
 	)
@@ -133,29 +132,15 @@ func newGrantCommand() *cobra.Command {
 	return command
 }
 
-func newInviteCommand() *cobra.Command {
-	options := inviteOptions{usersPath: defaultUsersPath}
-	command := &cobra.Command{
-		Use:   "invite",
-		Short: "Create a one-time enrollment invite",
-		Args:  cobra.NoArgs,
-		RunE: func(command *cobra.Command, _ []string) error {
-			return createInvite(options, command.OutOrStdout())
-		},
-	}
-	flags := command.Flags()
-	flags.StringVar(&options.usersPath, "users", options.usersPath, "authentication credentials and access policy JSON file")
-	flags.StringVar(&options.identity, "identity", "", "developer identity to invite")
-	mustMarkRequired(command, "identity")
-	return command
-}
-
 func newServeCommand() *cobra.Command {
 	options := serveOptions{
-		listenAddress:  defaultListenAddress,
-		metricsAddress: defaultMetricsAddress,
-		hostKeyPath:    defaultHostKeyPath,
-		usersPath:      defaultUsersPath,
+		listenAddress:         defaultListenAddress,
+		apiAddress:            defaultAPIAddress,
+		metricsAddress:        defaultMetricsAddress,
+		hostKeyPath:           defaultHostKeyPath,
+		usersPath:             defaultUsersPath,
+		registrationsPath:     defaultRegistrationsPath,
+		registrationNamespace: defaultRegistrationNamespace,
 	}
 	command := &cobra.Command{
 		Use:   "serve",
@@ -167,10 +152,12 @@ func newServeCommand() *cobra.Command {
 	}
 	flags := command.Flags()
 	flags.StringVar(&options.listenAddress, "listen", options.listenAddress, "SSH listen address")
+	flags.StringVar(&options.apiAddress, "api-listen", options.apiAddress, "registration API listen address; empty disables HTTP serving")
 	flags.StringVar(&options.metricsAddress, "metrics-listen", options.metricsAddress, "Prometheus metrics listen address; empty disables metrics")
 	flags.StringVar(&options.hostKeyPath, "host-key", options.hostKeyPath, "persistent SSH host private key")
-	flags.StringVar(&options.usersPath, "users", options.usersPath, "authentication credentials and access policy JSON file")
-	flags.StringVar(&options.authorizedKeysPath, "authorized-keys", "", "identity-bound SSH public keys JSON file (for example, a mounted Kubernetes Secret)")
+	flags.StringVar(&options.usersPath, "users", options.usersPath, "identity-bound service policy JSON file")
+	flags.StringVar(&options.registrationsPath, "registrations", options.registrationsPath, "durable UserRegistration store directory")
+	flags.StringVar(&options.registrationNamespace, "registration-namespace", options.registrationNamespace, "namespace used for SSH authentication")
 	flags.StringVar(&options.blueprintPath, "blueprint", "", "team environment blueprint provisioned for every authenticated identity")
 	flags.StringVar(&options.scalerName, "scaler", "", "workload scaler backend (supported: kubernetes)")
 	flags.BoolVar(&options.kubernetes, "kubernetes", false, "deprecated alias for --scaler kubernetes")

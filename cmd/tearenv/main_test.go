@@ -2,10 +2,21 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	v1alpha1 "github.com/fr0stylo/tearenv/api/v1alpha1"
+	"github.com/fr0stylo/tearenv/internal/client"
+	"github.com/fr0stylo/tearenv/internal/profile"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestRootCommandExposesDeveloperWorkflow(t *testing.T) {
@@ -16,12 +27,10 @@ func TestRootCommandExposesDeveloperWorkflow(t *testing.T) {
 		flags []string
 	}{
 		{path: []string{"login"}, flags: []string{
-			"method", "server", "identity", "invite", "private-key", "config", "known-hosts",
-			"kubeconfig", "kubernetes-context", "kubernetes-namespace", "kubernetes-secret",
-			"insecure-skip-host-key-check",
+			"api-url", "namespace", "server", "identity", "private-key", "registration", "config", "known-hosts", "insecure-skip-host-key-check",
 		}},
 		{path: []string{"services"}, flags: []string{"config"}},
-		{path: []string{"connect"}, flags: []string{"config", "listen-host", "server", "identity", "token", "private-key", "known-hosts", "insecure-skip-host-key-check"}},
+		{path: []string{"connect"}, flags: []string{"config", "listen-host", "server", "identity", "private-key", "known-hosts", "insecure-skip-host-key-check"}},
 	}
 
 	for _, test := range tests {
@@ -34,6 +43,226 @@ func TestRootCommandExposesDeveloperWorkflow(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoginCreatesLocalUserRegistration(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	httpClient := acceptedRegistrationClient(t)
+	options := loginOptions{
+		serverAddress:    "gateway.example.com:2222",
+		apiURL:           "https://api.example.com",
+		namespace:        "default",
+		identityDefault:  "workstation",
+		privateKeyPath:   filepath.Join(directory, "id_ed25519"),
+		registrationPath: filepath.Join(directory, "user-registration.yaml"),
+		profilePath:      filepath.Join(directory, "config.json"),
+		knownHostsPath:   filepath.Join(directory, "known_hosts"),
+		httpClient:       httpClient,
+	}
+	var output bytes.Buffer
+	var prompts bytes.Buffer
+	if err := login(context.Background(), options, strings.NewReader("alice\n"), &output, &prompts); err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(prompts.String(), "Identity [workstation]") {
+		t.Fatalf("prompt = %q, want hostname default", prompts.String())
+	}
+	if strings.TrimSpace(output.String()) != options.registrationPath {
+		t.Fatalf("output = %q, want registration path %q", output.String(), options.registrationPath)
+	}
+
+	contents, err := os.ReadFile(options.registrationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, err := v1alpha1.LoadUserRegistration(contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registration.Name != "alice" || registration.Spec.Identity != "alice" {
+		t.Fatalf("registration identity = %q/%q, want alice", registration.Name, registration.Spec.Identity)
+	}
+	if len(registration.Spec.PublicKeys) != 1 || registration.Spec.PublicKeys[0].Name != "workstation" {
+		t.Fatalf("registration public keys = %#v, want workstation", registration.Spec.PublicKeys)
+	}
+
+	signer, err := client.LoadPrivateKey(options.privateKeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registeredKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(registration.Spec.PublicKeys[0].Key))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ssh.FingerprintSHA256(registeredKey) != ssh.FingerprintSHA256(signer.PublicKey()) {
+		t.Fatal("registration public key does not match the saved private key")
+	}
+
+	saved, err := profile.Load(options.profilePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Identity != "alice" || saved.PrivateKey != options.privateKeyPath || saved.Token != "" {
+		t.Fatalf("saved profile = %#v, want public-key-only alice profile", saved)
+	}
+	for _, path := range []string{options.privateKeyPath, options.registrationPath, options.profilePath} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s permissions = %o, want 600", path, got)
+		}
+	}
+}
+
+func TestLoginUsesHostnameDefaultAndExplicitIdentitySkipsPrompt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		identity string
+		input    string
+		want     string
+		prompt   bool
+	}{
+		{name: "empty prompt", input: "\n", want: "build-host", prompt: true},
+		{name: "end of input", want: "build-host", prompt: true},
+		{name: "identity flag", identity: "alice", want: "alice"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			directory := t.TempDir()
+			httpClient := acceptedRegistrationClient(t)
+			options := loginOptions{
+				serverAddress:    "gateway.example.com:2222",
+				apiURL:           "https://api.example.com",
+				namespace:        "default",
+				identity:         test.identity,
+				identityDefault:  "build-host",
+				privateKeyPath:   filepath.Join(directory, "id_ed25519"),
+				registrationPath: filepath.Join(directory, "user-registration.yaml"),
+				profilePath:      filepath.Join(directory, "config.json"),
+				knownHostsPath:   filepath.Join(directory, "known_hosts"),
+				httpClient:       httpClient,
+			}
+			var prompts bytes.Buffer
+			if err := login(context.Background(), options, strings.NewReader(test.input), &bytes.Buffer{}, &prompts); err != nil {
+				t.Fatal(err)
+			}
+			contents, err := os.ReadFile(options.registrationPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			registration, err := v1alpha1.LoadUserRegistration(contents)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if registration.Spec.Identity != test.want {
+				t.Fatalf("identity = %q, want %q", registration.Spec.Identity, test.want)
+			}
+			if got := prompts.Len() != 0; got != test.prompt {
+				t.Fatalf("prompt written = %t, want %t; prompt: %q", got, test.prompt, prompts.String())
+			}
+		})
+	}
+}
+
+func TestLoginWaitsForAPIAcceptanceBeforeSavingProfile(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	httpClient := &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var registration v1alpha1.UserRegistration
+		if err := json.NewDecoder(request.Body).Decode(&registration); err != nil {
+			t.Fatalf("decode registration request: %v", err)
+		}
+		registration.Status = &v1alpha1.UserRegistrationStatus{Conditions: []metav1.Condition{{
+			Type:               v1alpha1.ConditionAccepted,
+			Status:             metav1.ConditionUnknown,
+			Reason:             "PendingApproval",
+			LastTransitionTime: metav1.Now(),
+		}}}
+		contents, err := json.Marshal(registration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusAccepted,
+			Status:     "202 Accepted",
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(contents)),
+		}, nil
+	})}
+	options := loginOptions{
+		serverAddress:    "gateway.example.com:2222",
+		apiURL:           "https://api.example.com",
+		namespace:        "default",
+		identity:         "alice",
+		identityDefault:  "workstation",
+		privateKeyPath:   filepath.Join(directory, "id_ed25519"),
+		registrationPath: filepath.Join(directory, "user-registration.yaml"),
+		profilePath:      filepath.Join(directory, "config.json"),
+		knownHostsPath:   filepath.Join(directory, "known_hosts"),
+		httpClient:       httpClient,
+	}
+	err := login(context.Background(), options, strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "pending approval") {
+		t.Fatalf("login() error = %v, want pending approval", err)
+	}
+	if _, err := os.Stat(options.profilePath); !os.IsNotExist(err) {
+		t.Fatalf("profile stat error = %v, want not exists", err)
+	}
+	contents, err := os.ReadFile(options.registrationPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, err := v1alpha1.LoadUserRegistration(contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registration.Status == nil || registration.Status.Conditions[0].Reason != "PendingApproval" {
+		t.Fatalf("saved registration status = %#v, want pending approval", registration.Status)
+	}
+}
+
+func acceptedRegistrationClient(t *testing.T) *http.Client {
+	t.Helper()
+	return &http.Client{Transport: commandRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var registration v1alpha1.UserRegistration
+		if err := json.NewDecoder(request.Body).Decode(&registration); err != nil {
+			t.Fatalf("decode registration request: %v", err)
+		}
+		registration.Status = &v1alpha1.UserRegistrationStatus{
+			ObservedGeneration: 1,
+			Conditions: []metav1.Condition{{
+				Type:               v1alpha1.ConditionAccepted,
+				Status:             metav1.ConditionTrue,
+				Reason:             "Approved",
+				LastTransitionTime: metav1.Now(),
+			}},
+		}
+		contents, err := json.Marshal(registration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusCreated,
+			Status:     "201 Created",
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(bytes.NewReader(contents)),
+		}, nil
+	})}
+}
+
+type commandRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function commandRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
 }
 
 func TestRootCommandProvidesGeneratedHelp(t *testing.T) {

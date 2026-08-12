@@ -1,6 +1,6 @@
 # Use tearenv as a developer
 
-Your operator should give you three things: an identity, a one-time invite, and a gateway address. Verify the gateway host key through a trusted channel before redeeming the invite.
+Your operator should give you the registration API URL, its namespace, the gateway address, and the gateway host-key fingerprint. The login prompt uses your local hostname as the default identity; use the operator-assigned identity when one was provided.
 
 ## Install the client
 
@@ -26,30 +26,31 @@ ssh-keygen -lf ~/.ssh/known_hosts
 
 If the gateway address contains a nonstandard port, keep that exact host and port in the profile. OpenSSH writes a bracketed entry such as `[gateway.example.com]:2222` to `known_hosts`.
 
-## Redeem an invite once
+## Register one local SSH key
 
 Run:
 
 ```sh
 tearenv login \
-  --identity alice \
-  --server gateway.example.com:2222 \
-  --invite "$INVITE"
-```
-
-You can avoid putting the invite in shell history by using the environment:
-
-```sh
-TEARENV_INVITE="$INVITE" tearenv login \
+  --api-url https://tearenv-api.example.com \
+  --namespace default \
   --identity alice \
   --server gateway.example.com:2222
 ```
 
-On Linux, the default profile is typically `~/.config/tearenv/config.json`. The exact location follows the operating system's user configuration directory. `tearenv` creates the directory with mode `0700` and the profile with mode `0600`.
+Omit `--identity` to use the interactive prompt:
 
-An invite can be redeemed only once. A successful login exchanges it for a personal token; it doesn't save the invite. Ask the operator for a new invite if login was completed on the wrong machine or the profile was lost.
+```sh
+tearenv login \
+  --api-url https://tearenv-api.example.com \
+  --server gateway.example.com:2222
+```
 
-If the gateway uses Kubernetes-managed SSH keys, run `tearenv login --method kubernetes` instead. The command keeps the private key on your machine and registers only its public key. Follow [the authentication guide](authentication.md) for the required flags and Kubernetes permissions.
+The command creates or reuses `id_ed25519`, writes `user-registration.yaml`, and submits the public resource to the API. On Linux these files and `config.json` are typically under `~/.config/tearenv`. The exact location follows the operating system's user configuration directory.
+
+The API is authoritative for registration state. The current tearenvd API accepts a valid first registration immediately and `config.json` is written after its `Accepted=True` response. Repeating login with the same key is idempotent.
+
+Keep `id_ed25519` private. The registration document contains only its public key. Follow [the authentication guide](authentication.md) for the HTTP path and trust boundary.
 
 ## See only your granted services
 
@@ -65,7 +66,7 @@ An operator can add or replace grants while the gateway is running. Run `tearenv
 
 ## Receive your team environment at login
 
-When the operator enables a team blueprint, your invite login and every later SSH login reconcile a namespace for your authenticated identity. For example, identity `alice` and blueprint `web-development` use `tearenv-alice-web-development`. Another identity receives another namespace.
+When the operator enables a team blueprint, every accepted SSH login reconciles a namespace for your authenticated identity. For example, identity `alice` and blueprint `web-development` use `tearenv-alice-web-development`. Another identity receives another namespace.
 
 Blueprint services appear in `tearenv services` after reconciliation succeeds. You don't supply a namespace or upload Kubernetes resources. A provisioning error rejects the login instead of returning a partially available catalog.
 
@@ -116,16 +117,18 @@ Use `--config` when you need separate gateways or identities:
 
 ```sh
 tearenv login \
+  --api-url https://staging-tearenv-api.example.com \
   --config ~/.config/tearenv/staging.json \
+  --registration ~/.config/tearenv/staging-registration.yaml \
+  --private-key ~/.config/tearenv/staging-id_ed25519 \
   --identity alice \
-  --server staging-gateway.example.com:2222 \
-  --invite "$STAGING_INVITE"
+  --server staging-gateway.example.com:2222
 
 tearenv services --config ~/.config/tearenv/staging.json
 tearenv connect --config ~/.config/tearenv/staging.json postgres
 ```
 
-`connect` can temporarily override the saved server, identity, token, private key, or `known_hosts` path. `TEARENV_TOKEN` is used only when `--token` isn't set, and either value overrides the saved token. These overrides are useful for automation, but keeping tokens in environment variables can expose them to local process inspection or debug output.
+`connect` can temporarily override the saved server, identity, private key, or `known_hosts` path. Keep separate private-key and registration paths when profiles represent different identities.
 
 ## Expect cold starts and idle behavior
 

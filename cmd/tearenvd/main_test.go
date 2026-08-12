@@ -19,9 +19,9 @@ func TestRootCommandExposesGatewayWorkflow(t *testing.T) {
 		flags []string
 	}{
 		{path: []string{"serve"}, flags: []string{
-			"listen", "metrics-listen", "host-key", "users", "authorized-keys", "blueprint", "scaler", "kubernetes",
+			"listen", "api-listen", "metrics-listen", "host-key", "users", "registrations",
+			"registration-namespace", "blueprint", "scaler", "kubernetes",
 		}},
-		{path: []string{"invite"}, flags: []string{"users", "identity"}},
 		{path: []string{"service", "grant"}, flags: []string{
 			"users", "identity", "name", "target", "local-port", "workload-kind",
 			"workload-namespace", "workload-name", "replicas", "ready-timeout", "idle-timeout",
@@ -107,7 +107,7 @@ func TestRootCommandProvidesGeneratedHelp(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Usage:", "Available Commands:", "blueprint", "invite", "serve", "service"} {
+	for _, text := range []string{"Usage:", "Available Commands:", "blueprint", "serve", "service"} {
 		if !strings.Contains(output.String(), text) {
 			t.Errorf("help does not contain %q:\n%s", text, output.String())
 		}
@@ -137,19 +137,6 @@ func TestRootCommandWithoutSubcommandShowsHelp(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "tearenvd [command]") {
 		t.Errorf("help does not contain root usage:\n%s", output.String())
-	}
-}
-
-func TestInviteRequiresIdentityFlag(t *testing.T) {
-	root := newRootCommand()
-	var output bytes.Buffer
-	root.SetOut(&output)
-	root.SetErr(&output)
-	root.SetArgs([]string{"invite"})
-
-	err := root.Execute()
-	if err == nil || !strings.Contains(err.Error(), `required flag(s) "identity" not set`) {
-		t.Fatalf("Execute() error = %v", err)
 	}
 }
 

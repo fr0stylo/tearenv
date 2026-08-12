@@ -1,0 +1,10 @@
+apiVersion: tearenv.io/v1alpha1
+kind: UserRegistration
+metadata:
+  name: alice
+  namespace: default
+spec:
+  identity: alice
+  publicKeys:
+    - name: laptop
+      key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILmTPRdIf20k+5PXX8QkqLozKCKk2QL/ebVm4VpGui/Z alice@example

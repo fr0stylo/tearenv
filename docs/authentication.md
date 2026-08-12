@@ -1,90 +1,56 @@
-# Choose an authentication method
+# Register with one SSH key
 
-tearenv separates authentication from authorization. Authentication proves an identity with a token or SSH key. Authorization maps that identity to the service aliases in the policy file.
+tearenv uses one developer authentication flow: `tearenv login` creates or reuses a local Ed25519 key and submits its public key as a `UserRegistration` resource. The private key never leaves the developer machine.
 
-The gateway can enable token and public-key authentication together. Each connection still uses the same identity-bound service policy.
-
-## Use invites and tokens for standalone deployments
-
-The default flow needs no Kubernetes access:
-
-```sh
-INVITE=$(tearenvd invite \
-  --users /var/lib/tearenv/users.json \
-  --identity alice)
-
-tearenv login \
-  --method token \
-  --identity alice \
-  --server gateway.example.com:2222 \
-  --invite "$INVITE"
-```
-
-The invite is single-use. The gateway stores a hash of the resulting token, while the developer profile stores the plaintext token with mode `0600`.
-
-## Keep private keys local for Kubernetes login
-
-Kubernetes login creates or reuses a local Ed25519 private key and adds only its public key to a Kubernetes Secret. Don't put the private key in Kubernetes. Anyone who can read that private key can authenticate as its identity.
-
-First, grant the identity at least one service. External authentication identities don't need an invite or token record:
-
-```sh
-tearenvd service grant \
-  --users /var/lib/tearenv/users.json \
-  --identity alice \
-  --name postgres \
-  --target postgres.dev-alice.svc.cluster.local:5432
-```
-
-Verify the gateway host key, then register the developer key:
+Run:
 
 ```sh
 tearenv login \
-  --method kubernetes \
-  --identity alice \
-  --server gateway.example.com:2222 \
-  --kubernetes-namespace tearenv-system \
-  --kubernetes-secret tearenv-authorized-keys
+  --api-url https://tearenv-api.example.com \
+  --namespace default \
+  --server gateway.example.com:2222
 ```
 
-The command uses the selected kubeconfig credentials, creates the Secret when needed, preserves keys for other identities, and saves the private-key path in the tearenv profile. Use `--kubeconfig` or `--kubernetes-context` when the default kubectl context isn't the intended cluster.
+The command prompts for an identity and offers the local hostname as the default. Pass `--identity` to skip the prompt.
 
-Mount the Secret data into the gateway pod:
+On Linux, the default files are:
 
-```yaml
-volumeMounts:
-  - name: authorized-keys
-    mountPath: /etc/tearenv/authorized-keys
-    readOnly: true
-volumes:
-  - name: authorized-keys
-    secret:
-      secretName: tearenv-authorized-keys
-      defaultMode: 0444
-      items:
-        - key: authorized_keys.json
-          path: authorized_keys.json
+```text
+~/.config/tearenv/id_ed25519
+~/.config/tearenv/user-registration.yaml
+~/.config/tearenv/config.json
 ```
 
-Start the gateway with the mounted document:
+The key, registration document, and profile use mode `0600`. The directory uses mode `0700`.
 
-```sh
-tearenvd serve \
-  --users /var/lib/tearenv/users.json \
-  --host-key /var/lib/tearenv/ssh_host_ed25519_key \
-  --authorized-keys /etc/tearenv/authorized-keys/authorized_keys.json
+## Submit the registration through the resource API
+
+Login sends JSON with an idempotent `PUT` request:
+
+```text
+PUT /apis/tearenv.io/v1alpha1/namespaces/{namespace}/userregistrations/{name}
 ```
 
-The gateway reloads the document for each authentication attempt. Kubernetes projected Secret updates therefore take effect without restarting tearenvd, subject to Kubernetes volume propagation delay.
+For example:
 
-## Treat Secret write access as identity administration
+```text
+PUT /apis/tearenv.io/v1alpha1/namespaces/default/userregistrations/alice
+```
 
-The Secret contains public keys, but its integrity is security-sensitive. A person who can change the shared document can add a key for another identity and inherit that identity's grants. Ordinary access to a Kubernetes cluster isn't enough; the caller needs explicit permission to get and update this Secret.
+The API owns the durable resource. The built-in tearenvd API accepts valid registrations immediately and returns the stored `UserRegistration` with `Accepted=True`. Login then writes `config.json`.
 
-Don't grant broad Secret write access just to make login self-service. Use an operator-controlled provisioning workflow, admission policy that binds Kubernetes identity to the tearenv identity, or a future OIDC provider. Kubernetes Secrets are base64-encoded and aren't encrypted at rest unless the cluster enables encryption.
+The first request creates the resource. Repeating the same request returns it unchanged, including its server-owned UID and resource version. A request that changes the spec at the same path returns `409 Conflict`; key replacement is deliberately not part of this first version.
 
-## Add OIDC behind the provider boundary
+`tearenvd serve` listens on `127.0.0.1:8080` by default and stores registrations under `.data/registrations`. Use `--api-listen :8080` when the endpoint must be reachable outside the gateway host, and put TLS or a trusted reverse proxy in front of it.
 
-OIDC isn't implemented yet. The gateway now depends on the `authorization.Authenticator` interface and evaluates a provider chain, so an OIDC verifier can be added without changing service policy or the SSH gateway.
+## Authorize identity claims at the API boundary
 
-An OIDC implementation still needs explicit choices for issuer URL, audience, username claim and prefix, required claims, token lifetime, refresh behavior, and browser or device login. The provider must validate the signature, issuer, audience, expiry, and required claims, then require the verified identity to match the requested SSH identity. Avoid saving a short-lived ID token as though it were a permanent tearenv token.
+Possessing a newly generated private key proves control of that key during SSH authentication. It doesn't prove that the person is entitled to the identity in `spec.identity`.
+
+The current self-service policy accepts people by default. The first writer can therefore claim an identity that has service grants. Bind the API to a trusted network, or add caller authentication before exposing it to users who shouldn't be able to claim arbitrary identities.
+
+## Keep the private key local
+
+Anyone who can read `id_ed25519` can authenticate as its accepted identity. Don't copy the private key into the registration API, Kubernetes, container images, tickets, or shared profiles.
+
+The submitted resource contains public material only. Check [the versioned API contract](../api/v1alpha1/README.md) for its fields and status semantics.

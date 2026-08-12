@@ -15,22 +15,19 @@ tearenvd completion --help
 
 ### `tearenv login`
 
-Creates a token or Kubernetes public-key login and atomically writes a local profile.
+Creates or reuses an Ed25519 key, submits a `UserRegistration` to the resource API, and writes a local profile after the API returns `Accepted=True`.
 
-| Option                           | Default                                                 | Meaning                                                 |
-| -------------------------------- | ------------------------------------------------------- | ------------------------------------------------------- |
-| `--method`                       | `token`                                                 | Login method: `token` or `kubernetes`.                  |
-| `--server`                       | `127.0.0.1:2222`                                        | SSH gateway address.                                    |
-| `--identity`                     | Current OS account name, or `tunnel` if unavailable     | Gateway identity.                                       |
-| `--invite`                       | `TEARENV_INVITE`                                        | One-time invite for token login.                        |
-| `--private-key`                  | OS config directory plus `tearenv/id_ed25519`           | Private key created or reused for Kubernetes login.     |
-| `--config`                       | OS config directory plus `tearenv/config.json`          | Profile destination.                                    |
-| `--known-hosts`                  | `~/.ssh/known_hosts` when a home directory is available | OpenSSH known-hosts file.                               |
-| `--kubeconfig`                   | Standard kubeconfig loading                             | Explicit kubeconfig for Kubernetes login.               |
-| `--kubernetes-context`           | Current kubeconfig context                              | Context used to update the authorized-keys Secret.      |
-| `--kubernetes-namespace`         | `tearenv-system`                                        | Namespace containing the authorized-keys Secret.        |
-| `--kubernetes-secret`            | `tearenv-authorized-keys`                               | Authorized-keys Secret name.                            |
-| `--insecure-skip-host-key-check` | `false`                                                 | Disables gateway identity verification for development. |
+| Option                           | Default                                                     | Meaning                                                   |
+| -------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------- |
+| `--api-url`                      | `http://127.0.0.1:8080`                                     | Base URL of the registration resource API.                |
+| `--namespace`                    | `default`                                                   | Namespace containing the registration resource.           |
+| `--server`                       | `127.0.0.1:2222`                                            | SSH gateway address saved in the profile.                  |
+| `--identity`                     | Prompt with the local hostname                              | tearenv identity; supplying it skips the prompt.           |
+| `--private-key`                  | OS config directory plus `tearenv/id_ed25519`               | Ed25519 private key created or reused locally.             |
+| `--registration`                 | OS config directory plus `tearenv/user-registration.yaml`   | Local copy of the submitted and observed resource.         |
+| `--config`                       | OS config directory plus `tearenv/config.json`              | Profile written after API acceptance.                      |
+| `--known-hosts`                  | `~/.ssh/known_hosts` when a home directory is available     | OpenSSH known-hosts file saved in the profile.             |
+| `--insecure-skip-host-key-check` | `false`                                                     | Disables gateway identity verification for development.    |
 
 ### `tearenv services`
 
@@ -50,7 +47,6 @@ Opens local TCP listeners for all granted services, or for the listed aliases. A
 | `--listen-host`                  | `127.0.0.1`                                    | Host used with suggested ports.                                                          |
 | `--server`                       | Saved value                                    | Temporary gateway override.                                                              |
 | `--identity`                     | Saved value                                    | Temporary identity override.                                                             |
-| `--token`                        | `TEARENV_TOKEN`, then saved value              | Temporary personal-token override.                                                       |
 | `--private-key`                  | Saved value                                    | Temporary SSH private-key override.                                                      |
 | `--known-hosts`                  | Saved value                                    | Temporary known-hosts override.                                                          |
 | `--insecure-skip-host-key-check` | Saved value                                    | Enables insecure verification for this run. It can't turn off an insecure saved profile. |
@@ -70,15 +66,6 @@ The generated file is tearenv configuration, not a Kubernetes CRD. The command d
 | Option   | Default                 | Meaning                  |
 | -------- | ----------------------- | ------------------------ |
 | `--name` | `developer-environment` | Blueprint metadata name. |
-
-### `tearenvd invite`
-
-| Option       | Default            | Meaning                     |
-| ------------ | ------------------ | --------------------------- |
-| `--users`    | `.data/users.json` | Credential and policy file. |
-| `--identity` | Required           | Identity to invite.         |
-
-The command prints the plaintext invite to standard output. Issuing a new invite removes any older pending invite for that identity.
 
 ### `tearenvd service grant`
 
@@ -100,46 +87,24 @@ Durations use Go syntax such as `500ms`, `30s`, `2m`, or `1h30m`. Negative timeo
 
 ### `tearenvd serve`
 
-| Option              | Default                      | Meaning                                                                  |
-| ------------------- | ---------------------------- | ------------------------------------------------------------------------ |
-| `--listen`          | `:2222`                      | SSH listen address.                                                      |
-| `--metrics-listen`  | `:9090`                      | Prometheus HTTP listen address; an empty value disables it.              |
-| `--host-key`        | `.data/ssh_host_ed25519_key` | Persistent SSH private host key.                                         |
-| `--users`           | `.data/users.json`           | Credential and policy file.                                              |
-| `--authorized-keys` | None                         | Identity-bound public-key JSON, usually from a mounted Secret.           |
-| `--blueprint`       | None                         | Team blueprint reconciled for every successfully authenticated identity. |
-| `--scaler`          | None                         | Scaler backend. The included value is `kubernetes`.                      |
-| `--kubernetes`      | `false`                      | Deprecated alias for `--scaler kubernetes`.                              |
+| Option                     | Default                      | Meaning                                                                  |
+| -------------------------- | ---------------------------- | ------------------------------------------------------------------------ |
+| `--listen`                 | `:2222`                      | SSH listen address.                                                      |
+| `--api-listen`             | `127.0.0.1:8080`             | Registration HTTP address; an empty value disables HTTP serving.         |
+| `--metrics-listen`         | `:9090`                      | Prometheus HTTP address; an empty value disables metrics.                |
+| `--host-key`               | `.data/ssh_host_ed25519_key` | Persistent SSH private host key.                                         |
+| `--users`                  | `.data/users.json`           | Identity-bound service policy file.                                      |
+| `--registrations`          | `.data/registrations`        | Durable `UserRegistration` directory.                                    |
+| `--registration-namespace` | `default`                    | Registration namespace used for SSH authentication.                      |
+| `--blueprint`              | None                         | Team blueprint reconciled for every successfully authenticated identity. |
+| `--scaler`                 | None                         | Scaler backend. The included value is `kubernetes`.                      |
+| `--kubernetes`             | `false`                      | Deprecated alias for `--scaler kubernetes`.                              |
 
-`--blueprint` requires `--scaler kubernetes` and in-cluster Kubernetes credentials. The daemon loads and validates the file at startup. Invite enrollment, token authentication, and public-key authentication all apply the identity namespace and resources before accepting the SSH login. A failed enrollment reconciliation doesn't consume the invite.
+`--blueprint` requires `--scaler kubernetes` and in-cluster Kubernetes credentials. The daemon loads and validates the file at startup. Accepted public-key authentication applies the identity namespace and resources before accepting the SSH login.
 
 ## Understand the client profile
 
-The client profile is JSON and must have mode `0600`; any group or world permission causes `tearenv` to reject it.
-
-```json
-{
-  "server": "gateway.example.com:2222",
-  "identity": "alice",
-  "token": "tu_redacted",
-  "known_hosts": "/home/alice/.ssh/known_hosts"
-}
-```
-
-An insecure development profile instead contains:
-
-```json
-{
-  "server": "127.0.0.1:2222",
-  "identity": "alice",
-  "token": "tu_redacted",
-  "insecure_skip_host_key_check": true
-}
-```
-
-Don't commit, distribute, or log this file. The token authenticates as its identity.
-
-A Kubernetes public-key profile stores a private-key path instead of a token:
+The client profile is JSON and must have mode `0600`; any group or world permission causes `tearenv` to reject it. The current login flow writes a private-key profile:
 
 ```json
 {
@@ -150,24 +115,25 @@ A Kubernetes public-key profile stores a private-key path instead of a token:
 }
 ```
 
-The private key file and profile must both have mode `0600`.
+An insecure development profile additionally contains:
 
-## Understand the credential and policy file
+```json
+{
+  "server": "127.0.0.1:2222",
+  "identity": "alice",
+  "private_key": "/home/alice/.config/tearenv/id_ed25519",
+  "insecure_skip_host_key_check": true
+}
+```
+
+Don't commit, distribute, or log the profile or private key. The private key file and profile must both have mode `0600`.
+
+## Understand the service policy file
 
 The server file is JSON and must have mode `0600`. Administrative commands create its parent directory with mode `0700` and replace the file atomically.
 
 ```json
 {
-  "users": {
-    "alice": {
-      "token_hash": "sha256-hex-redacted"
-    }
-  },
-  "invites": {
-    "sha256-hex-redacted": {
-      "identity": "bob"
-    }
-  },
   "access": {
     "alice": {
       "services": {
@@ -189,24 +155,9 @@ The server file is JSON and must have mode `0600`. Administrative commands creat
 }
 ```
 
-The file stores SHA256 hashes rather than plaintext personal tokens and invites. Older files with a plaintext `token` field of at least 16 characters are accepted for migration and rewritten as hashes on the next administrative mutation.
+Don't expose this file to clients. It contains private targets, identity policy, and workload metadata. `tearenvd service grant` creates it when the configured path doesn't exist.
 
-Don't expose this file to clients. Even without plaintext secrets, it contains private targets, identity policy, and workload metadata.
-
-The store may contain only `access` entries when every identity uses an external authentication provider. `tearenvd service grant` creates a new policy file when the configured path doesn't exist.
-
-## Understand the authorized-keys document
-
-`--authorized-keys` reads a JSON object from identity to one or more OpenSSH public keys:
-
-```json
-{
-  "alice": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."],
-  "bob": ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA..."]
-}
-```
-
-The file may be read-only or world-readable because it contains public material, but it must not be group- or world-writable. The gateway validates the full document at startup and reloads it for every public-key authentication attempt.
+Registration resources are stored separately under the `--registrations` directory. Each namespaced YAML file contains public keys and the server-owned accepted status.
 
 ## Apply naming and value rules
 
@@ -223,9 +174,7 @@ The catalog returned to clients contains only `name` and `local_port`.
 
 ## Use the supported environment variables
 
-| Variable                    | Used by           | Purpose                                              |
-| --------------------------- | ----------------- | ---------------------------------------------------- |
-| `TEARENV_INVITE`            | `tearenv login`   | Supplies the invite when `--invite` isn't set.       |
-| `TEARENV_TOKEN`             | `tearenv connect` | Overrides the saved token when `--token` isn't set.  |
-| `TEARENV_KIND_E2E`          | Test suite        | Set to `1` to opt into the Kind test.                |
-| `TEARENV_KEEP_KIND_CLUSTER` | Kind test         | Set to `1` to retain the test cluster for debugging. |
+| Variable                    | Used by    | Purpose                                              |
+| --------------------------- | ---------- | ---------------------------------------------------- |
+| `TEARENV_KIND_E2E`          | Test suite | Set to `1` to opt into the Kind test.                |
+| `TEARENV_KEEP_KIND_CLUSTER` | Kind test  | Set to `1` to retain the test cluster for debugging. |

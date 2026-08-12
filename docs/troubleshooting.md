@@ -4,19 +4,11 @@ Start on the side that reports the failure. Client startup failures usually conc
 
 ## Fix login failures
 
-### `invite is required`
+### Registration submission fails
 
-Pass `--invite` or set `TEARENV_INVITE` for the `login` process. Confirm the variable isn't empty:
+Confirm `--api-url` reaches the address configured by `tearenvd --api-listen`. A connection refusal usually means the API is disabled, bound only to loopback on another host, or blocked by a firewall.
 
-```sh
-test -n "$TEARENV_INVITE" && echo "invite is set"
-```
-
-### SSH authentication fails or enrollment is rejected
-
-Confirm the identity exactly matches the one passed to `tearenvd invite`. Invites are identity-bound, single-use bearer secrets. If the invite was already redeemed, copied incorrectly, or replaced by a newer invite, create and deliver a new one.
-
-On the gateway, look for `client enrollment rejected` or `client enrollment failed`. A read-only credential path can authenticate an invite but fail when enrollment tries to consume it and persist the token hash. Move the credential file to writable protected storage.
+A `409 Conflict` means a resource already exists at the same namespace and name with a different identity or key. Reuse the original private key, choose another identity/resource name, or have an operator deliberately remove the stored registration while the gateway is stopped.
 
 ### Host key verification fails
 
@@ -62,17 +54,12 @@ If a mounted filesystem can't enforce Unix modes, place the profile on a filesys
 
 ### `unable to authenticate` or `client authentication rejected`
 
-Check the saved `server` and `identity`, then ask the operator whether a new invite was redeemed for the same identity. Redeeming it rotates the personal token, so older profiles stop authenticating. Login again with the current invite.
+Check that the profile identity matches `spec.identity`, the profile's `private_key` exists with mode `0600`, and the API namespace matches `tearenvd --registration-namespace`. The gateway logs `provider=user-registration` after a successful key login.
 
-Temporary `--identity`, `--token`, `TEARENV_TOKEN`, and `--server` overrides can also create a mismatched identity/token pair. Remove the overrides and retry with the saved profile.
-
-For Kubernetes public-key login, confirm the profile's `private_key` exists with mode `0600`, the gateway uses `--authorized-keys`, and the mounted document contains the same identity and public key. Secret volume updates can take time to reach the pod. The gateway logs `provider=public-key` after a successful key login.
-
-If public-key registration fails, check the selected kubeconfig context and permission on the exact Secret:
+Compare the local public key with the persisted resource:
 
 ```sh
-kubectl auth can-i get secret/tearenv-authorized-keys -n tearenv-system
-kubectl auth can-i update secret/tearenv-authorized-keys -n tearenv-system
+ssh-keygen -y -f ~/.config/tearenv/id_ed25519
 ```
 
 ## Fix service selection and local listeners
@@ -109,13 +96,15 @@ If multiple selected services have the same suggested port, override at least on
 
 ### The credential file is missing or empty
 
-Create the first invite with the same `--users` path before starting `serve`:
+Create the policy file with the same `--users` path before starting `serve`:
 
 ```sh
-tearenvd invite --users /var/lib/tearenv/users.json --identity alice
+tearenvd service grant \
+  --users /var/lib/tearenv/users.json \
+  --identity alice \
+  --name postgres \
+  --target postgres.internal:5432
 ```
-
-For external authentication, create the policy file with `tearenvd service grant` instead.
 
 ### Credential permissions are rejected
 

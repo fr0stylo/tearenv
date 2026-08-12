@@ -49,7 +49,7 @@ tearenvd serve \
   --blueprint /etc/tearenv/environment-blueprint.yaml
 ```
 
-`--blueprint` requires `--scaler kubernetes` and in-cluster Kubernetes credentials. During invite enrollment, token authentication, or public-key authentication, `tearenvd` creates or patches the namespace and every namespaced object in `spec.resources`. If discovery, validation, or an API operation fails, authentication fails and the gateway doesn't publish the blueprint services for that session. An invite isn't consumed when provisioning prevents enrollment.
+`--blueprint` requires `--scaler kubernetes` and in-cluster Kubernetes credentials. During accepted public-key authentication, `tearenvd` creates or patches the namespace and every namespaced object in `spec.resources`. If discovery, validation, or an API operation fails, authentication fails and the gateway doesn't publish the blueprint services for that session.
 
 Use the Helm chart's `blueprint` values or the Kustomize `overlays/blueprint` overlay to mount the file and install the required ClusterRole. `EnvironmentBlueprint` is tearenv configuration, not a Kubernetes CRD, so don't pass the file to `kubectl apply`.
 

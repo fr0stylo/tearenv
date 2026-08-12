@@ -8,7 +8,8 @@ The repository is a Go module with no generated application code. Keep client, s
 cmd/tearenv/         developer CLI
 cmd/tearenvd/        gateway and administrative CLI
 internal/client/     enrollment, catalog, SSH connection, and local listeners
-internal/authorization/ authentication providers, credentials, invites, and service policy
+internal/authorization/ authentication interfaces and service policy
+internal/registration/  stateful UserRegistration HTTP API and SSH key provider
 internal/blueprint/  team blueprint schema, starter document, strict loading, and validation
 internal/environment/ authenticated provisioning and blueprint-backed service policy
 internal/profile/    protected client profile persistence
@@ -50,7 +51,7 @@ make e2e
 make manifests
 ```
 
-`make e2e` compiles both programs and verifies invite redemption, identity authentication, catalog authorization, local forwarding, invite single use, and cross-identity rejection.
+`make e2e` compiles both programs and verifies HTTP registration, idempotent state, SSH key authentication, catalog authorization, local forwarding, and cross-identity rejection.
 
 `make manifests` lints and renders the Helm chart and every Kustomize overlay. Docker image construction is also checked in CI.
 
@@ -82,7 +83,7 @@ Use short idle and readiness durations only in tests. Production defaults and ex
 
 Protocol changes deserve extra review. Don't add general shell handling or accept arbitrary hostnames and ports in direct TCP channels. Keep the catalog limited to information developers need, and resolve authorization from live server policy when each channel opens.
 
-Maintain owner-only modes and atomic replacement for files containing credentials. Avoid logging plaintext invites, tokens, profiles, or private keys.
+Maintain owner-only modes and atomic replacement for files containing profiles, private keys, policy, or registration state. Avoid logging profiles or private keys.
 
 ## Format Go and documentation
 

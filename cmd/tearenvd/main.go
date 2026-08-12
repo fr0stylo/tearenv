@@ -18,6 +18,7 @@ import (
 	"github.com/fr0stylo/tearenv/internal/blueprint"
 	"github.com/fr0stylo/tearenv/internal/environment"
 	"github.com/fr0stylo/tearenv/internal/kube"
+	"github.com/fr0stylo/tearenv/internal/registration"
 	"github.com/fr0stylo/tearenv/internal/scaler"
 	"github.com/fr0stylo/tearenv/internal/server"
 	"github.com/prometheus/client_golang/prometheus"
@@ -73,15 +74,6 @@ func grantService(options grantOptions) error {
 	return nil
 }
 
-func createInvite(options inviteOptions, output io.Writer) error {
-	invite, err := authorization.CreateInvite(options.usersPath, options.identity)
-	if err != nil {
-		return fmt.Errorf("create invite: %w", err)
-	}
-	fmt.Fprintln(output, invite)
-	return nil
-}
-
 func serve(ctx context.Context, options serveOptions) error {
 	metrics, metricsHandler, err := newMetricsEndpoint()
 	if err != nil {
@@ -91,15 +83,7 @@ func serve(ctx context.Context, options serveOptions) error {
 	if err != nil {
 		return err
 	}
-	providers := []authorization.Authenticator{credentials}
-	if options.authorizedKeysPath != "" {
-		publicKeys, err := authorization.LoadPublicKeys(options.authorizedKeysPath)
-		if err != nil {
-			return err
-		}
-		providers = append(providers, publicKeys)
-	}
-	authenticator, err := authorization.NewChain(providers...)
+	registrationStore, err := registration.NewStore(options.registrationsPath, options.registrationNamespace)
 	if err != nil {
 		return err
 	}
@@ -145,8 +129,7 @@ func serve(ctx context.Context, options serveOptions) error {
 	}
 	gateway := server.NewLifecycleGateway(policy, backend, slog.Default(), server.WithMetrics(metrics))
 	tunnelServer, err := server.New(server.Config{
-		Authenticator: authenticator,
-		Enrollment:    credentials,
+		Authenticator: registrationStore,
 		Policy:        policy,
 		Provisioner:   provisioner,
 		Signer:        signer,
@@ -160,36 +143,62 @@ func serve(ctx context.Context, options serveOptions) error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", options.listenAddress, err)
 	}
+	var apiServer *http.Server
+	var apiListener net.Listener
+	if options.apiAddress != "" {
+		apiListener, err = net.Listen("tcp", options.apiAddress)
+		if err != nil {
+			_ = listener.Close()
+			return fmt.Errorf("listen for registration API on %s: %w", options.apiAddress, err)
+		}
+		apiServer = &http.Server{
+			Handler:           registration.NewHandler(registrationStore),
+			ReadHeaderTimeout: 5 * time.Second,
+			IdleTimeout:       30 * time.Second,
+		}
+	}
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if options.metricsAddress == "" {
-		metrics.SetReady(true)
-		defer metrics.SetReady(false)
-		return serveSSH(ctx, tunnelServer, listener, signer, options, selectedScaler, "disabled")
-	}
-	metricsListener, err := net.Listen("tcp", options.metricsAddress)
-	if err != nil {
-		_ = listener.Close()
-		return fmt.Errorf("listen for metrics on %s: %w", options.metricsAddress, err)
-	}
-	metricsServer := &http.Server{
-		Handler:           metricsHandler,
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       30 * time.Second,
+	var metricsServer *http.Server
+	var metricsListener net.Listener
+	if options.metricsAddress != "" {
+		metricsListener, err = net.Listen("tcp", options.metricsAddress)
+		if err != nil {
+			_ = listener.Close()
+			if apiListener != nil {
+				_ = apiListener.Close()
+			}
+			return fmt.Errorf("listen for metrics on %s: %w", options.metricsAddress, err)
+		}
+		metricsServer = &http.Server{
+			Handler:           metricsHandler,
+			ReadHeaderTimeout: 5 * time.Second,
+			IdleTimeout:       30 * time.Second,
+		}
 	}
 	metrics.SetReady(true)
 	defer metrics.SetReady(false)
+	apiAddress := "disabled"
+	if apiListener != nil {
+		apiAddress = apiListener.Addr().String()
+	}
+	metricsAddress := "disabled"
+	if metricsListener != nil {
+		metricsAddress = metricsListener.Addr().String()
+	}
 	slog.Info("tearenvd ready",
 		"ssh", listener.Addr(),
-		"metrics", metricsListener.Addr(),
+		"api", apiAddress,
+		"metrics", metricsAddress,
 		"users", options.usersPath,
-		"authorized_keys", options.authorizedKeysPath,
+		"registrations", options.registrationsPath,
+		"registration_namespace", options.registrationNamespace,
 		"blueprint", options.blueprintPath,
 		"scaler", selectedScaler,
 		"host_key_fingerprint", ssh.FingerprintSHA256(signer.PublicKey()),
 	)
-	return serveListeners(ctx, tunnelServer, listener, metricsServer, metricsListener)
+	return serveListeners(ctx, tunnelServer, listener, apiServer, apiListener, metricsServer, metricsListener)
 }
 
 func newMetricsEndpoint() (*server.Metrics, http.Handler, error) {
@@ -212,51 +221,46 @@ func newMetricsEndpoint() (*server.Metrics, http.Handler, error) {
 	return metrics, mux, nil
 }
 
-func serveSSH(
-	ctx context.Context,
-	tunnelServer *server.Server,
-	listener net.Listener,
-	signer ssh.Signer,
-	options serveOptions,
-	selectedScaler string,
-	metricsAddress string,
-) error {
-	slog.Info("tearenvd ready",
-		"ssh", listener.Addr(),
-		"metrics", metricsAddress,
-		"users", options.usersPath,
-		"authorized_keys", options.authorizedKeysPath,
-		"blueprint", options.blueprintPath,
-		"scaler", selectedScaler,
-		"host_key_fingerprint", ssh.FingerprintSHA256(signer.PublicKey()),
-	)
-	return tunnelServer.Serve(ctx, listener)
-}
-
 func serveListeners(
 	ctx context.Context,
 	tunnelServer *server.Server,
 	sshListener net.Listener,
+	apiServer *http.Server,
+	apiListener net.Listener,
 	metricsServer *http.Server,
 	metricsListener net.Listener,
 ) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errorsChannel := make(chan error, 2)
-	go func() {
-		errorsChannel <- tunnelServer.Serve(ctx, sshListener)
-	}()
-	go func() {
-		errorsChannel <- serveMetrics(ctx, metricsServer, metricsListener)
-	}()
+	runners := []func(context.Context) error{
+		func(runContext context.Context) error { return tunnelServer.Serve(runContext, sshListener) },
+	}
+	if apiServer != nil && apiListener != nil {
+		runners = append(runners, func(runContext context.Context) error {
+			return serveHTTP(runContext, "registration API", apiServer, apiListener)
+		})
+	}
+	if metricsServer != nil && metricsListener != nil {
+		runners = append(runners, func(runContext context.Context) error {
+			return serveHTTP(runContext, "Prometheus metrics", metricsServer, metricsListener)
+		})
+	}
+	errorsChannel := make(chan error, len(runners))
+	for _, runner := range runners {
+		go func(run func(context.Context) error) {
+			errorsChannel <- run(ctx)
+		}(runner)
+	}
 
-	firstError := <-errorsChannel
+	errorsSeen := []error{<-errorsChannel}
 	cancel()
-	secondError := <-errorsChannel
-	return errors.Join(firstError, secondError)
+	for range len(runners) - 1 {
+		errorsSeen = append(errorsSeen, <-errorsChannel)
+	}
+	return errors.Join(errorsSeen...)
 }
 
-func serveMetrics(ctx context.Context, metricsServer *http.Server, listener net.Listener) error {
+func serveHTTP(ctx context.Context, name string, httpServer *http.Server, listener net.Listener) error {
 	done := make(chan struct{})
 	defer close(done)
 	go func() {
@@ -264,16 +268,16 @@ func serveMetrics(ctx context.Context, metricsServer *http.Server, listener net.
 		case <-ctx.Done():
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_ = metricsServer.Shutdown(shutdownCtx)
+			_ = httpServer.Shutdown(shutdownCtx)
 		case <-done:
 		}
 	}()
-	err := metricsServer.Serve(listener)
+	err := httpServer.Serve(listener)
 	if errors.Is(err, http.ErrServerClosed) && ctx.Err() != nil {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("serve Prometheus metrics: %w", err)
+		return fmt.Errorf("serve %s: %w", name, err)
 	}
 	return nil
 }

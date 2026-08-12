@@ -8,8 +8,8 @@ local app -> localhost -> tearenv -> SSH -> tearenvd -> private service
 
 The repository builds two programs:
 
-- `tearenv` logs in, lists granted services, and opens local ports.
-- `tearenvd` runs the gateway, creates invites, grants services, and provisions team blueprints.
+- `tearenv` registers a local SSH key, lists granted services, and opens local ports.
+- `tearenvd` serves registrations, runs the gateway, grants services, and provisions team blueprints.
 
 ## Build the binaries
 
@@ -33,11 +33,9 @@ Follow [the Kubernetes deployment guide](docs/kubernetes-deployment.md) to prepa
 
 ## Set up the gateway
 
-Create an identity and grant a service:
+Grant an identity a service:
 
 ```sh
-INVITE=$(./bin/tearenvd invite --identity alice)
-
 ./bin/tearenvd service grant \
   --identity alice \
   --name postgres \
@@ -47,7 +45,7 @@ INVITE=$(./bin/tearenvd invite --identity alice)
 Start the gateway:
 
 ```sh
-./bin/tearenvd serve --listen :2222
+./bin/tearenvd serve --listen :2222 --api-listen :8080
 ```
 
 Initialize a team-owned environment blueprint:
@@ -70,13 +68,13 @@ Each successful SSH login reconciles a separate namespace for that authenticated
 
 ## Connect as a developer
 
-Verify the gateway's SSH host key, then redeem the one-time invite:
+Verify the gateway's SSH host key, then submit a public-key registration:
 
 ```sh
 tearenv login \
+  --api-url https://tearenv-api.example.com \
   --identity alice \
-  --server gateway.example.com:2222 \
-  --invite "$INVITE"
+  --server gateway.example.com:2222
 ```
 
 List and connect the granted services:
@@ -88,7 +86,7 @@ tearenv connect
 
 Applications can now use the displayed localhost ports.
 
-Token invites are the default authentication method. Kubernetes deployments can instead keep a generated private key on the developer machine and register only its public key in a mounted Secret. See [choose an authentication method](docs/authentication.md).
+The private key remains under the local tearenv configuration directory. `tearenvd` persists the accepted resource under `.data/registrations` by default and uses it for SSH public-key authentication. See [register with one SSH key](docs/authentication.md).
 
 ## Read the documentation
 

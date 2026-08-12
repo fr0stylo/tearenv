@@ -1,6 +1,6 @@
 # Run tearenvd
 
-`tearenvd` combines an SSH gateway with administrative commands for invites and service grants. Use one protected policy file and one stable SSH host key for a gateway deployment. Authentication can use invite-issued tokens, Kubernetes-managed public keys, or both.
+`tearenvd` combines a `UserRegistration` HTTP API, an SSH gateway, and service-grant administration. Use a protected registration directory, one policy file, and one stable SSH host key for a gateway deployment. SSH public keys from accepted registrations are the current authentication method.
 
 ## Build and prepare storage
 
@@ -14,30 +14,30 @@ The default state paths are relative to the process working directory:
 
 ```text
 .data/users.json
+.data/registrations/
 .data/ssh_host_ed25519_key
 ```
 
-Use explicit absolute paths in a service manager or container. The credential file must be writable during invite redemption because enrollment consumes an invite and persists a new token hash. Both files contain security-sensitive state and should be readable only by the gateway account.
+Use explicit absolute paths in a service manager or container. The registration directory and host key must persist across restarts. All three paths are security-sensitive and should be writable only by the gateway account.
 
-## Create authentication or policy before starting a new gateway
+## Create policy before starting a new gateway
 
-A new credential file is created by the first invite:
+A new policy file is created by the first service grant:
 
 ```sh
-INVITE=$(./bin/tearenvd invite \
+./bin/tearenvd service grant \
   --users /var/lib/tearenv/users.json \
-  --identity alice)
+  --identity alice \
+  --name grpc \
+  --target api-alice.dev-alice.svc.cluster.local:50051 \
+  --local-port 50051
 ```
 
-`tearenvd serve` won't start with a missing or empty policy file. Token deployments can create the file with an invite. External-authentication deployments can create it with the first `service grant`. The identity must match `^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$`.
-
-Only a hash of the invite is stored. Creating another invite for the same identity invalidates its previous pending invite. If the identity is already registered, its current personal token keeps working until the new invite is redeemed; successful redemption rotates the personal token.
-
-Send the plaintext invite through a protected channel. It is a bearer secret until redeemed. Skip the invite when the identity will use an external authentication provider such as the Kubernetes public-key flow.
+`tearenvd serve` won't start with a missing or empty policy file. The identity must match `^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$`.
 
 ## Grant a static service
 
-Grant an identity before or after it redeems the invite:
+Grant an identity before or after it registers a public key:
 
 ```sh
 ./bin/tearenvd service grant \
@@ -61,16 +61,18 @@ Run:
 ```sh
 ./bin/tearenvd serve \
   --listen :2222 \
+  --api-listen :8080 \
   --metrics-listen :9090 \
   --users /var/lib/tearenv/users.json \
+  --registrations /var/lib/tearenv/registrations \
   --host-key /var/lib/tearenv/ssh_host_ed25519_key
 ```
 
 If the host key doesn't exist, `tearenvd` creates a persistent Ed25519 private key with mode `0600`. Back it up and mount it persistently. Replacing the key triggers host-key warnings for every existing client and must be communicated as a deliberate rotation.
 
-The startup log reports the bound address, credential path, scaler name, and public-key fingerprint. Publish the fingerprint through a trusted channel so developers can verify it before login.
+The startup log reports the bound SSH, API, and metrics addresses, state paths, scaler name, and public-key fingerprint. Publish the fingerprint through a trusted channel so developers can verify it before login.
 
-To enable SSH public keys from a mounted Kubernetes Secret, pass `--authorized-keys` with the mounted `authorized_keys.json` path. Follow [the authentication guide](authentication.md) for the Secret format, client registration command, and required security controls.
+The API automatically accepts the first valid resource at a path and stores it as protected YAML. Repeating the same registration is idempotent; changing its spec returns `409 Conflict`. Follow [the authentication guide](authentication.md) for the client command and trust boundary.
 
 The process handles `SIGINT` and `SIGTERM`. On shutdown it closes the SSH listener and attempts to scale down workloads started by that process, allowing up to 30 seconds for each scaler call.
 
@@ -183,15 +185,15 @@ tearenvd serve \
   --blueprint /etc/tearenv/environment-blueprint.yaml
 ```
 
-Every successful token or public-key authentication reconciles a namespace derived from the verified identity and blueprint name. `tearenvd` uses server-side apply for the namespace and namespaced resources. After reconciliation, the declared services appear in that identity's catalog and use the existing scale-to-zero lifecycle.
+Every successful registered public-key authentication reconciles a namespace derived from the verified identity and blueprint name. `tearenvd` uses server-side apply for the namespace and namespaced resources. After reconciliation, the declared services appear in that identity's catalog and use the existing scale-to-zero lifecycle.
 
 Provisioning errors reject the SSH login. The current daemon accepts one blueprint and applies it to every authenticated identity; developer selection among several team templates isn't implemented yet. See [the environment blueprint guide](environment-blueprints.md) for the schema, RBAC, and reconciliation limits.
 
 ## Use writable persistent state in Kubernetes
 
-Mount the credential file from protected writable storage if developers will enroll through this gateway or administrators will update the file in place. A Kubernetes Secret volume is read-only, so invite authentication may succeed but enrollment can't consume the invite and write the personal token hash.
+Mount the registration directory from protected writable persistent storage. A Kubernetes Secret volume is read-only and can't hold resources created through the HTTP API.
 
-A Secret volume is suitable only for a pre-provisioned, read-only credential document where enrollment and in-place administration are intentionally disabled. The Kind end-to-end fixture uses that model with precomputed test-token hashes; it isn't an onboarding pattern for production.
+The policy file may be mounted read-only when service grants are managed outside the running pod. Registration state must remain writable and persistent.
 
 Use a single writer for the credential file. Administrative commands use an atomic temporary-file rename, but two commands mutating separate copies or writing concurrently can still overwrite each other's changes. Back up the file before manual maintenance.
 

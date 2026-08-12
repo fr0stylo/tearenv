@@ -1,5 +1,7 @@
 # Deploy tearenv on Kubernetes
 
+> The current Helm and Kustomize manifests predate the built-in registration API. They don't yet expose port `8080` or mount persistent registration storage. Adapt those two pieces before using the new login flow in Kubernetes.
+
 Use either Helm or Kustomize to run one `tearenvd` gateway with persistent policy and SSH host-key storage. Both setups use a namespaced scaler Role by default and run the containers without root privileges.
 
 ## Publish the gateway image
@@ -15,14 +17,10 @@ The image contains `tearenvd` and runs as user `65532`.
 
 ## Create the initial policy
 
-Create a local policy with an invite and a service grant:
+Create a local policy with a service grant:
 
 ```sh
 make build
-
-INVITE=$(./bin/tearenvd invite \
-  --users /tmp/tearenv-users.json \
-  --identity alice)
 
 ./bin/tearenvd service grant \
   --users /tmp/tearenv-users.json \
@@ -31,7 +29,7 @@ INVITE=$(./bin/tearenvd invite \
   --target postgres.tearenv-system.svc.cluster.local:5432
 ```
 
-Send the invite to Alice through a protected channel. Keep the policy file private because it contains credential hashes, service targets, and authorization rules.
+Keep the policy file private because it contains service targets and authorization rules.
 
 ## Install with Helm
 
@@ -79,35 +77,18 @@ The default and load-balancer overlays can scale workloads only in `tearenv-syst
 
 The Kustomize Service exposes `/metrics` on its named `metrics` port, `9090`.
 
-## Enable Kubernetes public-key login
+## Expose the registration API
 
-The developer login command can create the authorized-key Secret before the gateway starts:
+Provide a persistent directory to `tearenvd --registrations`, expose its `--api-listen` port through TLS, then register from the developer client:
 
 ```sh
 tearenv login \
-  --method kubernetes \
+  --api-url https://tearenv-api.example.com \
   --identity alice \
-  --server gateway.example.com:2222 \
-  --kubernetes-namespace tearenv-system \
-  --kubernetes-secret tearenv-authorized-keys
+  --server gateway.example.com:2222
 ```
 
-For Helm, install or upgrade with:
-
-```sh
-helm upgrade --install tearenv deploy/helm/tearenv \
-  --namespace tearenv-system \
-  --reuse-values \
-  --set publicKeys.existingSecret=tearenv-authorized-keys
-```
-
-For Kustomize, apply the public-key overlay after the Secret exists:
-
-```sh
-kubectl apply -k deploy/kustomize/overlays/public-keys
-```
-
-Write access to this Secret is identity-administration access. Restrict who can create or update it.
+The current API accepts valid registrations by default. Restrict which network can reach it until caller identity enforcement is added.
 
 ## Create one environment namespace per identity
 
@@ -141,7 +122,7 @@ For Kustomize, replace `deploy/kustomize/overlays/blueprint/environment-blueprin
 kubectl apply -k deploy/kustomize/overlays/blueprint
 ```
 
-The invite login for an identity creates or patches its namespace and resources, as do later token or public-key logins. Login fails if reconciliation fails. Repeat logins use server-side apply against the same objects. Removing an object from the blueprint doesn't delete the existing object.
+An accepted public-key login creates or patches its identity namespace and resources. Login fails if reconciliation fails. Repeat logins use server-side apply against the same objects. Removing an object from the blueprint doesn't delete the existing object.
 
 Blueprint provisioning requires cluster-wide permission to create namespaces and create or patch the namespaced APIs used by the document. The supplied Helm and Kustomize rules cover common core, `apps`, `batch`, and `networking.k8s.io` resources. Review these permissions and extend them only for approved resource types. Don't apply the blueprint file directly with `kubectl`; `EnvironmentBlueprint` isn't a Kubernetes CRD.
 

@@ -4,7 +4,7 @@ tearenv narrows remote development access to an authenticated identity and an op
 
 ## Trust these components deliberately
 
-The developer trusts the local machine, the `tearenv` binary, and the verified `tearenvd` host key. The operator trusts the gateway host, credential storage, workload scaler permissions, private DNS, and target services.
+The developer trusts the local machine, the `tearenv` binary, the registration API, and the verified `tearenvd` host key. The operator trusts the gateway host, registration and policy storage, workload scaler permissions, private DNS, and target services.
 
 The gateway is a privileged policy enforcement point. It can reach every configured target and, with the Kubernetes backend, change replica counts for workloads permitted by its service account. Harden it and restrict administrative access accordingly.
 
@@ -12,9 +12,7 @@ The gateway is a privileged policy enforcement point. It can reach every configu
 
 The SSH server enables only the application protocol needed by tearenv:
 
-- Password authentication carries the invite or personal token inside SSH.
 - Public-key authentication proves possession of an identity-bound private key.
-- Enrollment requests can exchange a valid one-time invite for a personal token.
 - Catalog requests return aliases and suggested local ports.
 - Direct TCP channels accept a granted alias with port zero.
 
@@ -26,23 +24,21 @@ This boundary limits gateway-mediated access. It doesn't compensate for other ne
 
 Keep the Ed25519 host private key stable and protected. Developers must compare its public fingerprint through a trusted channel before login. `ssh-keyscan` discovers a key but doesn't prove its identity.
 
-Use `--insecure-skip-host-key-check` only for disposable local development. It makes the client accept any host key and enables machine-in-the-middle attacks that can capture an invite or personal token.
+Use `--insecure-skip-host-key-check` only for disposable local development. It makes the client accept any host key and enables machine-in-the-middle attacks against the tunnel.
 
 Plan host-key rotation like any SSH infrastructure change: publish the new fingerprint securely, update known-hosts entries, and investigate any unexpected mismatch.
 
-## Protect bearer credentials
+## Protect registration state and private keys
 
-One-time invites and personal tokens are bearer secrets tied to an identity. Send invites through a protected channel, redeem them promptly, and don't place them in tickets, chat rooms, shell history, or CI logs.
+The current API accepts valid registrations by default. The first writer at a resource path establishes its immutable identity and public-key spec. This is simple and stateful, but it is not identity verification: an untrusted caller could register a key for an identity before its intended owner.
 
-The server persists SHA256 hashes of invites and tokens. The client must retain its plaintext token to authenticate, so its profile is more sensitive than the hash-only server record. Both client and server reject their JSON file when group or world permission bits are present.
+The default API listener is loopback-only. When remote registration is required, expose it only to a trusted network and terminate TLS at the daemon or a reverse proxy. Add caller authentication before treating an untrusted network as self-service identity enrollment.
 
-Issuing a replacement invite doesn't immediately revoke an existing token. Redemption rotates the token. For immediate incident response, stop the gateway, remove the compromised identity and its access from a protected backup-derived credential document, preserve mode `0600`, and restart. The current CLI doesn't provide a revoke command.
+The private key stays in the developer's owner-only local file. Anyone who obtains it can authenticate as that identity. The server-side registration documents contain public keys, but write access is security-sensitive because it controls authentication. Keep the store on protected persistent storage and out of source control.
 
 ## Keep SSH private keys off the cluster
 
-Kubernetes login stores only public keys in the cluster and keeps the generated private key in an owner-only local file. Back up or rotate that local key according to your endpoint policy. Don't copy it into a Kubernetes Secret, container image, ticket, or shared profile.
-
-Write access to the authorized-keys Secret is equivalent to tearenv identity administration. A writer can insert a key for any identity in the document. Restrict updates to an operator workflow or enforce the Kubernetes-to-tearenv identity mapping with admission policy. Kubernetes cluster access by itself doesn't prove which tearenv identity a caller should receive.
+`tearenv login` submits only the public key and keeps the generated private key in an owner-only local file. Back up or rotate that local key according to your endpoint policy. Don't copy it into a Kubernetes Secret, container image, ticket, or shared profile.
 
 ## Keep local listeners private
 
@@ -80,10 +76,6 @@ Server-side apply doesn't prune objects removed from a blueprint. Use a controll
 
 ## Treat policy and logs as sensitive
 
-The server credential file contains identity mappings, private targets, aliases, and workload metadata even though credentials are hashed. Keep it out of source control, container images, client machines, and unprotected backups.
+The server policy file contains identity mappings, private targets, aliases, and workload metadata. Keep it out of source control, container images, client machines, and unprotected backups.
 
-Gateway logs include identities, remote addresses, service aliases, and server-side targets. Restrict log access and retention. The implementation doesn't log plaintext tokens or invites; avoid adding command wrappers that do.
-
-## Understand cryptographic scope
-
-Hashing protects stored credentials from direct disclosure, but unsalted SHA256 isn't a password-hardening scheme. tearenv-generated invites and tokens contain 32 random bytes, making offline guessing impractical. Don't replace them with human-chosen tokens through legacy file fields.
+Gateway logs include identities, remote addresses, service aliases, and server-side targets. Restrict log access and retention. The implementation doesn't log private keys; avoid adding command wrappers that do.

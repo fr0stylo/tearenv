@@ -46,9 +46,9 @@ The current daemon has one configured blueprint and applies it automatically. A 
 
 ## Follow a connection through the gateway
 
-1. An operator creates a one-time invite and grants one or more aliases to its identity.
-2. The developer verifies the gateway's SSH host key and redeems the invite.
-3. `tearenv` saves a personal token in an owner-only local profile.
+1. An operator grants one or more aliases to an identity.
+2. The developer verifies the gateway's SSH host key and runs `tearenv login`.
+3. `tearenv` creates a local Ed25519 key, submits its public key to the resource API, and saves an owner-only profile.
 4. `tearenv services` authenticates. If a blueprint is configured, `tearenvd` reconciles the identity namespace and resources before returning the catalog.
 5. `tearenv connect` authenticates, binds local listeners, and waits.
 6. A local application opens a TCP connection. `tearenv` requests the alias with port zero over an SSH `direct-tcpip` channel.
