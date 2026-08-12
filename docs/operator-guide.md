@@ -163,6 +163,16 @@ If multiple aliases belong to the same workload, give them the same workload kin
 
 Static grants can coexist with scaled grants. Starting without `--scaler` keeps static services working, but every grant with workload metadata fails when a developer tries to connect.
 
+## Initialize a reusable team environment blueprint
+
+Generate the first versioned environment blueprint with:
+
+```sh
+tearenvd blueprint init > environment-blueprint.yaml
+```
+
+The team owns the blueprint and will make it available for authenticated identities to select through the planned catalog. The blueprint describes a namespace derived from both identity and blueprint name, namespaced Kubernetes resources, exposed services, and their scale-up and scale-down policy. Initialization doesn't apply resources to Kubernetes yet. See [the environment blueprint guide](environment-blueprints.md) for the schema and provisioning boundary.
+
 ## Use writable persistent state in Kubernetes
 
 Mount the credential file from protected writable storage if developers will enroll through this gateway or administrators will update the file in place. A Kubernetes Secret volume is read-only, so invite authentication may succeed but enrollment can't consume the invite and write the personal token hash.

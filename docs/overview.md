@@ -34,6 +34,16 @@ tearenv -- authenticated SSH --> tearenvd
 
 `tearenvd` owns policy and private infrastructure details. Operators choose the identity, alias, target, suggested local port, workload, startup timeout, and idle timeout. This is why the two programs live in one repository: their small SSH protocol is one product boundary, and changes to either side can be tested end to end.
 
+## Reuse team definitions without trusting user-supplied identity
+
+An `EnvironmentBlueprint` moves the repeated Kubernetes shape into a team-owned definition. The blueprint contains resource templates, exposed services, and scale policies. It doesn't contain the identity that will run it.
+
+The planned request flow lets an authenticated developer select a blueprint by `metadata.name`. `tearenvd` takes the identity from the authenticated SSH session and combines it with the selected blueprint name. A request won't be able to override that identity.
+
+Each environment namespace includes both values, such as `tearenv-alice-web-development`. Alice can select another team blueprint without colliding with her existing environment, and Bob receives a separate namespace when he selects the same blueprint.
+
+Blueprint initialization is implemented. Catalog storage, authorization, resource reconciliation, and developer requests aren't implemented yet, so the current connection flow still starts from operator-created service grants.
+
 ## Follow a connection through the gateway
 
 1. An operator creates a one-time invite and grants one or more aliases to its identity.

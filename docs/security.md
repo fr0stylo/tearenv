@@ -66,6 +66,14 @@ The scaler doesn't create, patch, or delete workloads. It changes desired replic
 
 Don't run multiple uncoordinated gateway replicas against the same managed workloads. Each replica has independent active counts and timers, so one could scale down a workload used through another.
 
+## Keep environment blueprints under team control
+
+An environment blueprint contains Kubernetes resource templates. Treat permission to create or modify the team blueprint catalog as infrastructure-administration access, not ordinary developer access. Review images, commands, volumes, service accounts, security contexts, and network exposure before making a blueprint selectable.
+
+The planned environment request accepts a blueprint reference, not an identity. `tearenvd` must bind the request to the authenticated SSH identity and derive the namespace from that identity plus the selected blueprint name. Don't add a client-controlled identity field to this path.
+
+Namespace separation is one layer, not the whole boundary. Apply ResourceQuota, LimitRange, RBAC, Pod Security admission, and NetworkPolicy appropriate for untrusted workloads. The current implementation initializes blueprint YAML but doesn't apply or authorize it yet.
+
 ## Treat policy and logs as sensitive
 
 The server credential file contains identity mappings, private targets, aliases, and workload metadata even though credentials are hashed. Keep it out of source control, container images, client machines, and unprotected backups.

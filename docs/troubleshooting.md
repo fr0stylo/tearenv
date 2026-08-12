@@ -150,6 +150,22 @@ Stop the other listener or change `--listen`. Developers must use the same publi
 
 `--scaler kubernetes` loads only in-cluster configuration. Running it on a workstation, even with a valid `KUBECONFIG`, reports an in-cluster configuration error. Run `tearenvd` in a Kubernetes pod, or omit the scaler for static services.
 
+## Fix blueprint initialization problems
+
+### `metadata.name` is invalid
+
+Pass a lowercase Kubernetes DNS label to `--name`. Use letters, numbers, and internal hyphens:
+
+```sh
+tearenvd blueprint init --name web-development > web-development.yaml
+```
+
+Spaces, uppercase letters, underscores, and names longer than a Kubernetes DNS label are rejected.
+
+### `kubectl apply` doesn't recognize `EnvironmentBlueprint`
+
+An `EnvironmentBlueprint` is tearenv configuration, not a Kubernetes CRD. Don't pass the generated file to `kubectl`. Catalog storage and resource reconciliation aren't implemented yet, so keep the file in team-controlled configuration storage for the future provisioner.
+
 ## Fix target and scaling failures
 
 ### The server logs `service target is unavailable`

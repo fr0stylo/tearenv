@@ -108,6 +108,20 @@ kubectl apply -k deploy/kustomize/overlays/public-keys
 
 Write access to this Secret is identity-administration access. Restrict who can create or update it.
 
+## Prepare team blueprints separately for now
+
+Generate and review a reusable environment definition with:
+
+```sh
+tearenvd blueprint init \
+  --name web-development \
+  > web-development.yaml
+```
+
+The generated namespace template separates environments by authenticated identity and selected blueprint. Resource templates omit `metadata.namespace` because the future provisioner will inject the rendered namespace.
+
+The Helm chart and Kustomize manifests don't mount, store, or apply blueprint files yet. Keep reviewed blueprint YAML in your team-controlled configuration repository until catalog storage and reconciliation are implemented. Don't apply the generated document with `kubectl`; `EnvironmentBlueprint` isn't a Kubernetes CRD.
+
 ## Operate and upgrade the gateway
 
 Wait for startup and inspect logs:

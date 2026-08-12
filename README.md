@@ -1,6 +1,6 @@
 # tearenv
 
-`tearenv` gives developers secure localhost access to private TCP services. The `tearenvd` gateway authorizes service names, hides private targets, and can scale Kubernetes workloads up on connection and down after inactivity.
+`tearenv` gives developers secure localhost access to private TCP services. The `tearenvd` gateway authorizes service names, hides private targets, and can scale Kubernetes workloads up on connection and down after inactivity. Teams can also initialize reusable Kubernetes environment blueprints that will become the catalog developers select from.
 
 ```text
 local app -> localhost -> tearenv -> SSH -> tearenvd -> private service
@@ -50,6 +50,16 @@ Start the gateway:
 ./bin/tearenvd serve --listen :2222
 ```
 
+Initialize a team-owned environment blueprint:
+
+```sh
+./bin/tearenvd blueprint init \
+  --name web-development \
+  > web-development.yaml
+```
+
+Blueprint initialization is available now. Applying a blueprint and requesting one from the developer client are the next implementation slice.
+
 ## Connect as a developer
 
 Verify the gateway's SSH host key, then redeem the one-time invite:
@@ -74,7 +84,7 @@ Token invites are the default authentication method. Kubernetes deployments can 
 
 ## Read the documentation
 
-Start with the [documentation index](docs/README.md), or go directly to the [local walkthrough](docs/getting-started.md), [developer guide](docs/developer-guide.md), [operator guide](docs/operator-guide.md), or [troubleshooting guide](docs/troubleshooting.md).
+Start with the [documentation index](docs/README.md), or go directly to the [local walkthrough](docs/getting-started.md), [developer guide](docs/developer-guide.md), [operator guide](docs/operator-guide.md), [environment blueprint guide](docs/environment-blueprints.md), or [troubleshooting guide](docs/troubleshooting.md).
 
 ## Run the checks
 

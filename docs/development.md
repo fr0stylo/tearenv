@@ -9,6 +9,7 @@ cmd/tearenv/         developer CLI
 cmd/tearenvd/        gateway and administrative CLI
 internal/client/     enrollment, catalog, SSH connection, and local listeners
 internal/authorization/ authentication providers, credentials, invites, and service policy
+internal/blueprint/  team blueprint schema, starter document, strict loading, and validation
 internal/profile/    protected client profile persistence
 internal/protocol/   shared SSH request names and public catalog types
 internal/server/     SSH transport, host keys, proxy channels, and lifecycle
@@ -24,6 +25,8 @@ deploy/kubernetes/   minimal scaler RBAC example
 Authentication providers implement `authorization.Authenticator` and can be composed with `authorization.NewChain`. A provider verifies one credential method and returns the verified identity. The server rejects a provider result that doesn't match the requested SSH identity. Service grants remain independent through `authorization.Policy`.
 
 Runtime backends implement `scaler.Backend`. A new backend receives a workload kind, namespace-like scope, name, and replica count. The lifecycle gateway owns connection tracking, readiness polling, and idle timers independently of the backend.
+
+Environment blueprint changes belong in `internal/blueprint`. Keep the versioned schema independent of authenticated environment requests: team operators own blueprint definitions, while the future request path supplies only a blueprint reference and gets identity from the authenticated server context.
 
 ## Run the standard checks
 
@@ -70,7 +73,7 @@ The test prints the retained kubectl context. Without that variable, cleanup del
 
 ## Add behavior with focused tests
 
-Authentication, credential, and policy changes belong in `internal/authorization`. Lifecycle timing and shared-workload activity belong in `internal/server/lifecycle_test.go`. Kubernetes API behavior belongs in `internal/kube`, which uses injected clients. Client/server integration belongs in `internal/client/integration_test.go`; binary behavior belongs in `e2e/e2e_test.go`.
+Authentication, credential, and policy changes belong in `internal/authorization`. Blueprint schema and reference validation belong in `internal/blueprint/blueprint_test.go`. Lifecycle timing and shared-workload activity belong in `internal/server/lifecycle_test.go`. Kubernetes API behavior belongs in `internal/kube`, which uses injected clients. Client/server integration belongs in `internal/client/integration_test.go`; binary behavior belongs in `e2e/e2e_test.go`.
 
 Use short idle and readiness durations only in tests. Production defaults and examples should remain realistic and shouldn't make correctness depend on tight scheduler timing.
 

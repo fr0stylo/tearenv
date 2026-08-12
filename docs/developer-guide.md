@@ -63,6 +63,12 @@ The catalog contains service aliases and suggested local ports, sorted by alias.
 
 An operator can add or replace grants while the gateway is running. Run `tearenv services` again to fetch current policy.
 
+## Expect team blueprint selection in a later release
+
+Teams can initialize reusable environment blueprints, but the current developer client can't list or request them yet. Operators still create identity-bound grants before services appear in `tearenv services`.
+
+The planned flow will let you select a team-approved blueprint by name. The gateway will use your authenticated identity to create a separate namespace for that selection. You won't send an identity in the environment request, and you won't upload or modify the team's blueprint.
+
 ## Connect all services on suggested ports
 
 Run:

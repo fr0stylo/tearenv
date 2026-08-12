@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fr0stylo/tearenv/internal/blueprint"
 	"github.com/spf13/cobra"
 )
 
@@ -25,6 +26,7 @@ func TestRootCommandExposesGatewayWorkflow(t *testing.T) {
 			"users", "identity", "name", "target", "local-port", "workload-kind",
 			"workload-namespace", "workload-name", "replicas", "ready-timeout", "idle-timeout",
 		}},
+		{path: []string{"blueprint", "init"}, flags: []string{"name"}},
 	}
 
 	for _, test := range tests {
@@ -36,6 +38,35 @@ func TestRootCommandExposesGatewayWorkflow(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBlueprintInitWritesValidStarterBlueprint(t *testing.T) {
+	root := newRootCommand()
+	var output bytes.Buffer
+	root.SetOut(&output)
+	root.SetErr(&output)
+	root.SetArgs([]string{"blueprint", "init", "--name", "team-environment"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	document, err := blueprint.Load(output.Bytes())
+	if err != nil {
+		t.Fatalf("load generated blueprint: %v\n%s", err, output.String())
+	}
+	if document.Metadata.Name != "team-environment" {
+		t.Fatalf("metadata.name = %q, want team-environment", document.Metadata.Name)
+	}
+}
+
+func TestBlueprintInitRejectsInvalidName(t *testing.T) {
+	root := newRootCommand()
+	root.SetArgs([]string{"blueprint", "init", "--name", "Not Valid"})
+
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "metadata.name") {
+		t.Fatalf("Execute() error = %v, want invalid metadata.name", err)
 	}
 }
 
@@ -76,7 +107,7 @@ func TestRootCommandProvidesGeneratedHelp(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	for _, text := range []string{"Usage:", "Available Commands:", "invite", "serve", "service"} {
+	for _, text := range []string{"Usage:", "Available Commands:", "blueprint", "invite", "serve", "service"} {
 		if !strings.Contains(output.String(), text) {
 			t.Errorf("help does not contain %q:\n%s", text, output.String())
 		}

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/fr0stylo/tearenv/internal/authorization"
+	"github.com/fr0stylo/tearenv/internal/blueprint"
 	"github.com/fr0stylo/tearenv/internal/kube"
 	"github.com/fr0stylo/tearenv/internal/scaler"
 	"github.com/fr0stylo/tearenv/internal/server"
@@ -30,6 +31,7 @@ const (
 	defaultMetricsAddress = ":9090"
 	defaultHostKeyPath    = ".data/ssh_host_ed25519_key"
 	defaultUsersPath      = ".data/users.json"
+	defaultBlueprintName  = "developer-environment"
 )
 
 type grantOptions struct {
@@ -49,6 +51,10 @@ type grantOptions struct {
 type inviteOptions struct {
 	usersPath string
 	identity  string
+}
+
+type blueprintInitOptions struct {
+	name string
 }
 
 type serveOptions struct {
@@ -84,8 +90,44 @@ func newRootCommand() *cobra.Command {
 		newServeCommand(),
 		newInviteCommand(),
 		newServiceCommand(),
+		newBlueprintCommand(),
 	)
 	return command
+}
+
+func newBlueprintCommand() *cobra.Command {
+	command := &cobra.Command{
+		Use:   "blueprint",
+		Short: "Manage team environment blueprints",
+	}
+	command.AddCommand(newBlueprintInitCommand())
+	return command
+}
+
+func newBlueprintInitCommand() *cobra.Command {
+	options := blueprintInitOptions{name: defaultBlueprintName}
+	command := &cobra.Command{
+		Use:   "init",
+		Short: "Write a starter environment blueprint",
+		Args:  cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			command.SilenceUsage = true
+			return initializeBlueprint(options, command.OutOrStdout())
+		},
+	}
+	command.Flags().StringVar(&options.name, "name", options.name, "blueprint metadata name")
+	return command
+}
+
+func initializeBlueprint(options blueprintInitOptions, output io.Writer) error {
+	contents, err := blueprint.Marshal(blueprint.Default(options.name))
+	if err != nil {
+		return fmt.Errorf("initialize blueprint: %w", err)
+	}
+	if _, err := output.Write(contents); err != nil {
+		return fmt.Errorf("write blueprint: %w", err)
+	}
+	return nil
 }
 
 func newServiceCommand() *cobra.Command {

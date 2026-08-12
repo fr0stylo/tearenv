@@ -61,6 +61,16 @@ Requesting the same alias more than once is rejected. With no positional aliases
 
 Running `tearenvd` without a subcommand displays help. Use `tearenvd serve` to start the gateway.
 
+### `tearenvd blueprint init`
+
+Writes a team-owned `tearenv.io/v1alpha1` `EnvironmentBlueprint` to standard output. Redirect it to a file, then edit the reusable Kubernetes resources and service policies that authenticated identities will select through the planned catalog.
+
+The generated file is tearenv configuration, not a Kubernetes CRD. The command doesn't contact Kubernetes, persist a catalog, or make the blueprint available to developers.
+
+| Option   | Default                 | Meaning                  |
+| -------- | ----------------------- | ------------------------ |
+| `--name` | `developer-environment` | Blueprint metadata name. |
+
 ### `tearenvd invite`
 
 | Option       | Default            | Meaning                     |
