@@ -88,6 +88,10 @@ spec:
             - /etc/tearenv/host_key
             - --users
             - /etc/tearenv/users.json
+            - --registrations
+            - /etc/tearenv/registrations
+            - --api-listen
+            - ""
             - --scaler
             - kubernetes
             - --blueprint
@@ -109,6 +113,17 @@ spec:
           secret:
             secretName: tearenvd-config
             defaultMode: 0400
+            items:
+              - key: users.json
+                path: users.json
+              - key: host_key
+                path: host_key
+              - key: blueprint.yaml
+                path: blueprint.yaml
+              - key: alice.yaml
+                path: registrations/default/alice.yaml
+              - key: bob.yaml
+                path: registrations/default/bob.yaml
 ---
 apiVersion: v1
 kind: Service

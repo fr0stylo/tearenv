@@ -2,8 +2,6 @@ package e2e_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -17,10 +15,15 @@ import (
 	"testing"
 	"time"
 
+	v1alpha1 "github.com/fr0stylo/tearenv/api/v1alpha1"
 	"github.com/fr0stylo/tearenv/internal/blueprint"
+	"github.com/fr0stylo/tearenv/internal/client"
 	"github.com/fr0stylo/tearenv/internal/profile"
+	"github.com/fr0stylo/tearenv/internal/registration"
 	"github.com/fr0stylo/tearenv/internal/server"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -28,9 +31,7 @@ const (
 	kindE2EKeepCluster    = "TEARENV_KEEP_KIND_CLUSTER"
 	kindNamespace         = "tearenv-e2e"
 	kindAliceResponse     = "alice workload\n"
-	kindAliceToken        = "tearenv-kind-alice-token-long-enough"
 	kindBobResponse       = "bob workload\n"
-	kindBobToken          = "tearenv-kind-bob-token-long-enough"
 	kindBlueprintResponse = "blueprint workload\n"
 	kindCommandTimeout    = 5 * time.Minute
 	kindConditionTimeout  = 90 * time.Second
@@ -114,6 +115,8 @@ func TestKubernetesScalingWithKind(t *testing.T) {
 	}
 	credentialsPath := filepath.Join(temporary, "users.json")
 	writeKindCredentials(t, credentialsPath)
+	registrationsPath := filepath.Join(temporary, "registrations")
+	privateKeys := writeKindRegistrations(t, registrationsPath, temporary)
 	blueprintPath := filepath.Join(temporary, "blueprint.yaml")
 	writeKindBlueprint(t, blueprintPath, imageName)
 
@@ -123,6 +126,8 @@ func TestKubernetesScalingWithKind(t *testing.T) {
 		"--from-file=users.json="+credentialsPath,
 		"--from-file=host_key="+hostKeyPath,
 		"--from-file=blueprint.yaml="+blueprintPath,
+		"--from-file=alice.yaml="+filepath.Join(registrationsPath, "default", "alice.yaml"),
+		"--from-file=bob.yaml="+filepath.Join(registrationsPath, "default", "bob.yaml"),
 	)
 	manifestPath := filepath.Join(root, "e2e", "kind", "manifests.yaml")
 	manifest, err := os.ReadFile(manifestPath)
@@ -159,8 +164,8 @@ func TestKubernetesScalingWithKind(t *testing.T) {
 	if err := os.WriteFile(knownHostsPath, []byte(knownHost), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	aliceAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "alice", kindAliceToken, "http")
-	bobAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "bob", kindBobToken, "http")
+	aliceAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "alice", privateKeys["alice"], "http")
+	bobAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "bob", privateKeys["bob"], "http")
 	aliceURL := "http://" + aliceAddress + "/"
 	bobURL := "http://" + bobAddress + "/"
 	aliceEnvironment := "tearenv-alice-developer-environment"
@@ -169,8 +174,8 @@ func TestKubernetesScalingWithKind(t *testing.T) {
 		waitForDeploymentReplicasInNamespace(t, root, contextName, namespace, "workspace", "0", kindConditionTimeout)
 	}
 
-	aliceBlueprintAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "alice", kindAliceToken, "web")
-	bobBlueprintAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "bob", kindBobToken, "web")
+	aliceBlueprintAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "alice", privateKeys["alice"], "web")
+	bobBlueprintAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "bob", privateKeys["bob"], "web")
 	assertHTTPResponse(t, "http://"+aliceBlueprintAddress+"/", kindBlueprintResponse)
 	waitForDeploymentReplicasInNamespace(t, root, contextName, aliceEnvironment, "workspace", "1", 2*time.Second)
 	waitForDeploymentReplicasInNamespace(t, root, contextName, bobEnvironment, "workspace", "0", 2*time.Second)
@@ -223,13 +228,13 @@ func requireCommands(t *testing.T, commands ...string) {
 	}
 }
 
-func startKindClient(t *testing.T, root, temporary, clientBinary, sshAddress, knownHostsPath, identity, token, service string) string {
+func startKindClient(t *testing.T, root, temporary, clientBinary, sshAddress, knownHostsPath, identity, privateKey, service string) string {
 	t.Helper()
 	profilePath := filepath.Join(temporary, identity+"-"+service+"-profile.json")
 	if err := profile.Save(profilePath, profile.Profile{
 		ServerAddress: sshAddress,
 		Identity:      identity,
-		Token:         token,
+		PrivateKey:    privateKey,
 		KnownHosts:    knownHostsPath,
 	}); err != nil {
 		t.Fatal(err)
@@ -286,13 +291,7 @@ func buildLinuxBinary(t *testing.T, root, output, packagePath string) {
 
 func writeKindCredentials(t *testing.T, path string) {
 	t.Helper()
-	aliceHash := sha256.Sum256([]byte(kindAliceToken))
-	bobHash := sha256.Sum256([]byte(kindBobToken))
-	document := fmt.Sprintf(`{
-  "users": {
-    "alice": {"token_hash": %q},
-    "bob": {"token_hash": %q}
-  },
+	document := `{
   "access": {
     "alice": {
       "services": {
@@ -328,10 +327,45 @@ func writeKindCredentials(t *testing.T, path string) {
     }
   }
 }
-`, hex.EncodeToString(aliceHash[:]), hex.EncodeToString(bobHash[:]))
+`
 	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeKindRegistrations(t *testing.T, registrationsPath, temporary string) map[string]string {
+	t.Helper()
+	store, err := registration.NewStore(registrationsPath, "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateKeys := make(map[string]string, 2)
+	for _, identity := range []string{"alice", "bob"} {
+		privateKey := filepath.Join(temporary, identity+"_id_ed25519")
+		signer, err := client.LoadOrCreatePrivateKey(privateKey, identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resource := v1alpha1.UserRegistration{
+			TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.APIVersion, Kind: v1alpha1.UserRegistrationKind},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      v1alpha1.ResourceName(identity),
+				Namespace: "default",
+			},
+			Spec: v1alpha1.UserRegistrationSpec{
+				Identity: identity,
+				PublicKeys: []v1alpha1.SSHPublicKey{{
+					Name: "kind-e2e",
+					Key:  strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))),
+				}},
+			},
+		}
+		if _, _, err := store.Put(resource); err != nil {
+			t.Fatal(err)
+		}
+		privateKeys[identity] = privateKey
+	}
+	return privateKeys
 }
 
 func mustRunCommand(t *testing.T, workingDirectory string, environment []string, executable string, arguments ...string) string {
