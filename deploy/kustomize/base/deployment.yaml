@@ -47,12 +47,16 @@ spec:
           args:
             - serve
             - --listen=:2222
+            - --metrics-listen=:9090
             - --users=/var/lib/tearenv/users.json
             - --host-key=/var/lib/tearenv/ssh_host_ed25519_key
             - --scaler=kubernetes
           ports:
             - name: ssh
               containerPort: 2222
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
               protocol: TCP
           livenessProbe:
             tcpSocket:

@@ -4,6 +4,7 @@ go 1.26.4
 
 require (
 	github.com/gliderlabs/ssh v0.3.8
+	github.com/prometheus/client_golang v1.12.1
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/crypto v0.50.0
 	k8s.io/api v0.34.2
@@ -171,7 +172,6 @@ require (
 	github.com/pelletier/go-toml/v2 v2.3.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	github.com/prometheus/client_golang v1.12.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.32.1 // indirect
 	github.com/prometheus/procfs v0.7.3 // indirect

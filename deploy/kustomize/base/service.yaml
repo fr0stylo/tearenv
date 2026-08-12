@@ -9,3 +9,7 @@ spec:
       port: 2222
       targetPort: ssh
       protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP

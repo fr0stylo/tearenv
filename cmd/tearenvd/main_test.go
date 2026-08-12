@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -15,7 +17,9 @@ func TestRootCommandExposesGatewayWorkflow(t *testing.T) {
 		path  []string
 		flags []string
 	}{
-		{path: []string{"serve"}, flags: []string{"listen", "host-key", "users", "authorized-keys", "scaler", "kubernetes"}},
+		{path: []string{"serve"}, flags: []string{
+			"listen", "metrics-listen", "host-key", "users", "authorized-keys", "scaler", "kubernetes",
+		}},
 		{path: []string{"invite"}, flags: []string{"users", "identity"}},
 		{path: []string{"service", "grant"}, flags: []string{
 			"users", "identity", "name", "target", "local-port", "workload-kind",
@@ -32,6 +36,33 @@ func TestRootCommandExposesGatewayWorkflow(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNewMetricsEndpointIncludesAutomaticCollectors(t *testing.T) {
+	metrics, handler, err := newMetricsEndpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics.SetReady(true)
+
+	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /metrics status = %d, want %d", response.Code, http.StatusOK)
+	}
+	for _, name := range []string{
+		"go_goroutines",
+		"process_cpu_seconds_total",
+		"promhttp_metric_handler_requests_total",
+		"tearenv_daemon_ready",
+		"tearenv_engine_managed_workloads",
+	} {
+		if !strings.Contains(response.Body.String(), name) {
+			t.Errorf("metrics output does not contain %q", name)
+		}
 	}
 }
 

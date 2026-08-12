@@ -32,13 +32,15 @@ type ServiceGateway interface {
 	Open(ctx context.Context, identity, name string) (net.Conn, authorization.Service, error)
 }
 
-func serviceCatalogHandler(gateway ServiceGateway, logger *slog.Logger) gliderssh.RequestHandler {
+func serviceCatalogHandler(gateway ServiceGateway, logger *slog.Logger, metrics *Metrics) gliderssh.RequestHandler {
 	return func(ctx gliderssh.Context, _ *gliderssh.Server, _ *ssh.Request) (bool, []byte) {
 		if _, enrollment := protocol.EnrollmentIdentity(ctx.User()); enrollment {
+			metrics.observeCatalog(metricResultRejected)
 			return false, nil
 		}
 		services, err := gateway.Services(ctx, ctx.User())
 		if err != nil {
+			metrics.observeCatalog(metricResultError)
 			logger.Warn("service catalog failed", "identity", ctx.User(), "error", err)
 			return false, nil
 		}
@@ -48,8 +50,10 @@ func serviceCatalogHandler(gateway ServiceGateway, logger *slog.Logger) gliderss
 		}
 		payload, err := json.Marshal(response)
 		if err != nil {
+			metrics.observeCatalog(metricResultError)
 			return false, nil
 		}
+		metrics.observeCatalog(metricResultSuccess)
 		return true, payload
 	}
 }

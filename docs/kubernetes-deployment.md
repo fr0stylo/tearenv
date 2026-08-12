@@ -52,6 +52,8 @@ helm upgrade --install tearenv deploy/helm/tearenv \
 
 The default Service is cluster-local. Set `service.type=LoadBalancer` in a values file when the cluster should publish the SSH endpoint.
 
+The Service also exposes the Prometheus endpoint as the `metrics` port. Set `metrics.enabled=false` to disable it, or change `metrics.port` when port `9090` isn't available. Point your Prometheus discovery configuration or ServiceMonitor at the `metrics` port and `/metrics` path.
+
 The scaler Role covers only the release namespace. List workload namespaces with `scaler.rbac.namespaces`, or use `scaler.rbac.clusterWide=true` only when cluster-wide scaling is required.
 
 ## Install with Kustomize
@@ -73,6 +75,8 @@ kubectl apply -k deploy/kustomize/overlays/cluster-wide
 ```
 
 The default and load-balancer overlays can scale workloads only in `tearenv-system`. The cluster-wide overlay replaces that Role with a ClusterRole.
+
+The Kustomize Service exposes `/metrics` on its named `metrics` port, `9090`.
 
 ## Enable Kubernetes public-key login
 

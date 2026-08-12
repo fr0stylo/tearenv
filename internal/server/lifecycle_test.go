@@ -13,13 +13,25 @@ import (
 
 	"github.com/fr0stylo/tearenv/internal/authorization"
 	scalerpkg "github.com/fr0stylo/tearenv/internal/scaler"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestLifecycleGatewayScalesUpWaitsAndScalesDown(t *testing.T) {
 	address := reserveTCPAddress(t)
 	credentials := credentialsWithWorkload(t, address)
 	scaler := &fakeScaler{onScaleUp: func() { startEchoAt(t, address) }}
-	gateway := NewLifecycleGateway(credentials, scaler, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	registry := prometheus.NewRegistry()
+	metrics, err := NewMetrics(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := NewLifecycleGateway(
+		credentials,
+		scaler,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		WithMetrics(metrics),
+	)
 
 	connection, _, err := gateway.Open(context.Background(), "alice", "postgres")
 	if err != nil {
@@ -42,6 +54,21 @@ func TestLifecycleGatewayScalesUpWaitsAndScalesDown(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		if calls := scaler.Calls(); len(calls) == 2 && calls[0] == 1 && calls[1] == 0 {
+			if got := testutil.ToFloat64(metrics.serviceOpens.WithLabelValues(metricServiceManaged, metricResultSuccess)); got != 1 {
+				t.Fatalf("successful managed service opens = %v, want 1", got)
+			}
+			if got := testutil.ToFloat64(metrics.scaleOperations.WithLabelValues(metricDirectionUp, metricResultSuccess)); got != 1 {
+				t.Fatalf("successful scale-up operations = %v, want 1", got)
+			}
+			if got := testutil.ToFloat64(metrics.scaleOperations.WithLabelValues(metricDirectionDown, metricResultSuccess)); got != 1 {
+				t.Fatalf("successful scale-down operations = %v, want 1", got)
+			}
+			if got := testutil.ToFloat64(metrics.activeConnections.WithLabelValues(metricServiceManaged)); got != 0 {
+				t.Fatalf("active managed connections = %v, want 0", got)
+			}
+			if got := testutil.ToFloat64(metrics.managedWorkloads); got != 0 {
+				t.Fatalf("managed workloads = %v, want 0", got)
+			}
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

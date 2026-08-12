@@ -19,6 +19,7 @@ type lifecycleGateway struct {
 	policy   authorization.Policy
 	scaler   scaler.Backend
 	logger   *slog.Logger
+	metrics  *Metrics
 	mu       sync.Mutex
 	runtimes map[string]*serviceRuntime
 }
@@ -32,18 +33,37 @@ type serviceRuntime struct {
 	idleTimer *time.Timer
 }
 
+// LifecycleOption customizes the service lifecycle engine.
+type LifecycleOption func(*lifecycleGateway)
+
+// WithMetrics instruments service lifecycle operations with metrics.
+func WithMetrics(metrics *Metrics) LifecycleOption {
+	return func(gateway *lifecycleGateway) {
+		gateway.metrics = metrics
+	}
+}
+
 // NewLifecycleGateway creates the service runtime boundary. A nil scaler is
 // valid for static services but rejects grants containing workload metadata.
-func NewLifecycleGateway(policy authorization.Policy, backend scaler.Backend, logger *slog.Logger) ServiceGateway {
+func NewLifecycleGateway(
+	policy authorization.Policy,
+	backend scaler.Backend,
+	logger *slog.Logger,
+	options ...LifecycleOption,
+) ServiceGateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &lifecycleGateway{
+	gateway := &lifecycleGateway{
 		policy:   policy,
 		scaler:   backend,
 		logger:   logger,
 		runtimes: make(map[string]*serviceRuntime),
 	}
+	for _, option := range options {
+		option(gateway)
+	}
+	return gateway
 }
 
 func (gateway *lifecycleGateway) Services(_ context.Context, identity string) ([]authorization.Service, error) {
@@ -66,10 +86,11 @@ func (gateway *lifecycleGateway) Shutdown(ctx context.Context) error {
 			runtime.idleTimer = nil
 		}
 		if runtime.scaled && runtime.workload != nil {
-			if err := gateway.scaler.Scale(ctx, scalerTarget(runtime.workload), 0); err != nil && firstError == nil {
+			if err := gateway.scale(ctx, runtime.workload, 0); err != nil && firstError == nil {
 				firstError = err
 			} else if err == nil {
 				runtime.scaled = false
+				gateway.metrics.workloadStopped()
 			}
 		}
 		runtime.mu.Unlock()
@@ -78,9 +99,21 @@ func (gateway *lifecycleGateway) Shutdown(ctx context.Context) error {
 }
 
 func (gateway *lifecycleGateway) Open(ctx context.Context, identity, name string) (net.Conn, authorization.Service, error) {
+	started := time.Now()
+	serviceType := metricServiceUnknown
+	result := metricResultSuccess
+	defer func() {
+		gateway.metrics.observeServiceOpen(serviceType, result, time.Since(started))
+	}()
+
 	service, allowed := gateway.policy.ResolveService(identity, name)
 	if !allowed {
+		result = metricResultDenied
 		return nil, authorization.Service{}, ErrServiceDenied
+	}
+	serviceType = metricServiceStatic
+	if service.Workload != nil {
+		serviceType = metricServiceManaged
 	}
 	runtime := gateway.runtime(identity, service)
 	runtime.mu.Lock()
@@ -96,29 +129,37 @@ func (gateway *lifecycleGateway) Open(ctx context.Context, identity, name string
 	}
 	if service.Workload != nil && !runtime.scaled {
 		if gateway.scaler == nil {
+			result = metricResultScalerUnavailable
 			return nil, service, ErrScalerUnavailable
 		}
 		gateway.logger.Info("scaling service up", "identity", identity, "service", name, "replicas", service.Workload.Replicas)
-		if err := gateway.scaler.Scale(ctx, scalerTarget(service.Workload), service.Workload.Replicas); err != nil {
+		if err := gateway.scale(ctx, service.Workload, service.Workload.Replicas); err != nil {
+			result = metricResultScaleError
 			return nil, service, fmt.Errorf("scale service up: %w", err)
 		}
 		runtime.scaled = true
+		gateway.metrics.workloadStarted()
 	}
 
 	connection, err := dialService(ctx, service)
 	if err != nil {
+		result = metricResultDialError
 		if service.Workload != nil && runtime.active == 0 {
 			downscaleCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			_ = gateway.scaler.Scale(downscaleCtx, scalerTarget(service.Workload), 0)
+			downscaleErr := gateway.scale(downscaleCtx, service.Workload, 0)
 			cancel()
-			runtime.scaled = false
+			if downscaleErr == nil {
+				runtime.scaled = false
+				gateway.metrics.workloadStopped()
+			}
 		}
 		return nil, service, err
 	}
 	runtime.active++
+	gateway.metrics.connectionOpened(serviceType)
 	return &trackedConnection{
 		Conn:    connection,
-		release: func() { gateway.release(runtime) },
+		release: func() { gateway.release(runtime, serviceType) },
 	}, service, nil
 }
 
@@ -137,11 +178,12 @@ func (gateway *lifecycleGateway) runtime(identity string, service authorization.
 	return runtime
 }
 
-func (gateway *lifecycleGateway) release(runtime *serviceRuntime) {
+func (gateway *lifecycleGateway) release(runtime *serviceRuntime, serviceType string) {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	if runtime.active > 0 {
 		runtime.active--
+		gateway.metrics.connectionClosed(serviceType)
 	}
 	if runtime.active != 0 || runtime.workload == nil || !runtime.scaled {
 		return
@@ -156,14 +198,30 @@ func (gateway *lifecycleGateway) release(runtime *serviceRuntime) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := gateway.scaler.Scale(ctx, scalerTarget(runtime.workload), 0); err != nil {
+		if err := gateway.scale(ctx, runtime.workload, 0); err != nil {
 			gateway.logger.Warn("service downscale failed", "service", runtime.label, "error", err)
 			return
 		}
 		runtime.scaled = false
+		gateway.metrics.workloadStopped()
 		runtime.idleTimer = nil
 		gateway.logger.Info("service scaled down", "service", runtime.label)
 	})
+}
+
+func (gateway *lifecycleGateway) scale(ctx context.Context, workload *authorization.Workload, replicas int32) error {
+	direction := metricDirectionDown
+	if replicas > 0 {
+		direction = metricDirectionUp
+	}
+	started := time.Now()
+	err := gateway.scaler.Scale(ctx, scalerTarget(workload), replicas)
+	result := metricResultSuccess
+	if err != nil {
+		result = metricResultError
+	}
+	gateway.metrics.observeScale(direction, result, time.Since(started))
+	return err
 }
 
 func dialService(ctx context.Context, service authorization.Service) (net.Conn, error) {

@@ -19,6 +19,10 @@ service:
   port: 2222
   annotations: {}
 
+metrics:
+  enabled: true
+  port: 9090
+
 bootstrap:
   # Use existingSecret for production so policy data is not stored in Helm release values.
   existingSecret: ""

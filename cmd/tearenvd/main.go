@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -16,14 +18,18 @@ import (
 	"github.com/fr0stylo/tearenv/internal/kube"
 	"github.com/fr0stylo/tearenv/internal/scaler"
 	"github.com/fr0stylo/tearenv/internal/server"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh"
 )
 
 const (
-	defaultListenAddress = ":2222"
-	defaultHostKeyPath   = ".data/ssh_host_ed25519_key"
-	defaultUsersPath     = ".data/users.json"
+	defaultListenAddress  = ":2222"
+	defaultMetricsAddress = ":9090"
+	defaultHostKeyPath    = ".data/ssh_host_ed25519_key"
+	defaultUsersPath      = ".data/users.json"
 )
 
 type grantOptions struct {
@@ -47,6 +53,7 @@ type inviteOptions struct {
 
 type serveOptions struct {
 	listenAddress      string
+	metricsAddress     string
 	hostKeyPath        string
 	usersPath          string
 	authorizedKeysPath string
@@ -180,9 +187,10 @@ func createInvite(options inviteOptions, output io.Writer) error {
 
 func newServeCommand() *cobra.Command {
 	options := serveOptions{
-		listenAddress: defaultListenAddress,
-		hostKeyPath:   defaultHostKeyPath,
-		usersPath:     defaultUsersPath,
+		listenAddress:  defaultListenAddress,
+		metricsAddress: defaultMetricsAddress,
+		hostKeyPath:    defaultHostKeyPath,
+		usersPath:      defaultUsersPath,
 	}
 	command := &cobra.Command{
 		Use:   "serve",
@@ -195,6 +203,7 @@ func newServeCommand() *cobra.Command {
 	}
 	flags := command.Flags()
 	flags.StringVar(&options.listenAddress, "listen", options.listenAddress, "SSH listen address")
+	flags.StringVar(&options.metricsAddress, "metrics-listen", options.metricsAddress, "Prometheus metrics listen address; empty disables metrics")
 	flags.StringVar(&options.hostKeyPath, "host-key", options.hostKeyPath, "persistent SSH host private key")
 	flags.StringVar(&options.usersPath, "users", options.usersPath, "authentication credentials and access policy JSON file")
 	flags.StringVar(&options.authorizedKeysPath, "authorized-keys", "", "identity-bound SSH public keys JSON file (for example, a mounted Kubernetes Secret)")
@@ -207,6 +216,10 @@ func newServeCommand() *cobra.Command {
 }
 
 func serve(ctx context.Context, options serveOptions) error {
+	metrics, metricsHandler, err := newMetricsEndpoint()
+	if err != nil {
+		return err
+	}
 	credentials, err := authorization.LoadCredentials(options.usersPath)
 	if err != nil {
 		return err
@@ -238,13 +251,14 @@ func serve(ctx context.Context, options serveOptions) error {
 	if err != nil {
 		return err
 	}
-	gateway := server.NewLifecycleGateway(credentials, backend, slog.Default())
+	gateway := server.NewLifecycleGateway(credentials, backend, slog.Default(), server.WithMetrics(metrics))
 	tunnelServer, err := server.New(server.Config{
 		Authenticator: authenticator,
 		Enrollment:    credentials,
 		Policy:        credentials,
 		Signer:        signer,
 		Gateway:       gateway,
+		Metrics:       metrics,
 	})
 	if err != nil {
 		return fmt.Errorf("configure server: %w", err)
@@ -256,14 +270,117 @@ func serve(ctx context.Context, options serveOptions) error {
 
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if options.metricsAddress == "" {
+		metrics.SetReady(true)
+		defer metrics.SetReady(false)
+		return serveSSH(ctx, tunnelServer, listener, signer, options, selectedScaler, "disabled")
+	}
+	metricsListener, err := net.Listen("tcp", options.metricsAddress)
+	if err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("listen for metrics on %s: %w", options.metricsAddress, err)
+	}
+	metricsServer := &http.Server{
+		Handler:           metricsHandler,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       30 * time.Second,
+	}
+	metrics.SetReady(true)
+	defer metrics.SetReady(false)
 	slog.Info("tearenvd ready",
 		"ssh", listener.Addr(),
+		"metrics", metricsListener.Addr(),
+		"users", options.usersPath,
+		"authorized_keys", options.authorizedKeysPath,
+		"scaler", selectedScaler,
+		"host_key_fingerprint", ssh.FingerprintSHA256(signer.PublicKey()),
+	)
+	return serveListeners(ctx, tunnelServer, listener, metricsServer, metricsListener)
+}
+
+func newMetricsEndpoint() (*server.Metrics, http.Handler, error) {
+	registry := prometheus.NewRegistry()
+	for _, collector := range []prometheus.Collector{
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	} {
+		if err := registry.Register(collector); err != nil {
+			return nil, nil, fmt.Errorf("register automatic Prometheus collector: %w", err)
+		}
+	}
+	metrics, err := server.NewMetrics(registry)
+	if err != nil {
+		return nil, nil, err
+	}
+	metricsHandler := promhttp.InstrumentMetricHandler(registry, promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", metricsHandler)
+	return metrics, mux, nil
+}
+
+func serveSSH(
+	ctx context.Context,
+	tunnelServer *server.Server,
+	listener net.Listener,
+	signer ssh.Signer,
+	options serveOptions,
+	selectedScaler string,
+	metricsAddress string,
+) error {
+	slog.Info("tearenvd ready",
+		"ssh", listener.Addr(),
+		"metrics", metricsAddress,
 		"users", options.usersPath,
 		"authorized_keys", options.authorizedKeysPath,
 		"scaler", selectedScaler,
 		"host_key_fingerprint", ssh.FingerprintSHA256(signer.PublicKey()),
 	)
 	return tunnelServer.Serve(ctx, listener)
+}
+
+func serveListeners(
+	ctx context.Context,
+	tunnelServer *server.Server,
+	sshListener net.Listener,
+	metricsServer *http.Server,
+	metricsListener net.Listener,
+) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	errorsChannel := make(chan error, 2)
+	go func() {
+		errorsChannel <- tunnelServer.Serve(ctx, sshListener)
+	}()
+	go func() {
+		errorsChannel <- serveMetrics(ctx, metricsServer, metricsListener)
+	}()
+
+	firstError := <-errorsChannel
+	cancel()
+	secondError := <-errorsChannel
+	return errors.Join(firstError, secondError)
+}
+
+func serveMetrics(ctx context.Context, metricsServer *http.Server, listener net.Listener) error {
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = metricsServer.Shutdown(shutdownCtx)
+		case <-done:
+		}
+	}()
+	err := metricsServer.Serve(listener)
+	if errors.Is(err, http.ErrServerClosed) && ctx.Err() != nil {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("serve Prometheus metrics: %w", err)
+	}
+	return nil
 }
 
 func mustMarkRequired(command *cobra.Command, names ...string) {

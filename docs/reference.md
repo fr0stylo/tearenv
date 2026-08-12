@@ -93,6 +93,7 @@ Durations use Go syntax such as `500ms`, `30s`, `2m`, or `1h30m`. Negative timeo
 | Option              | Default                      | Meaning                                                        |
 | ------------------- | ---------------------------- | -------------------------------------------------------------- |
 | `--listen`          | `:2222`                      | SSH listen address.                                            |
+| `--metrics-listen`  | `:9090`                      | Prometheus HTTP listen address; an empty value disables it.    |
 | `--host-key`        | `.data/ssh_host_ed25519_key` | Persistent SSH private host key.                               |
 | `--users`           | `.data/users.json`           | Credential and policy file.                                    |
 | `--authorized-keys` | None                         | Identity-bound public-key JSON, usually from a mounted Secret. |

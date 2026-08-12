@@ -23,4 +23,6 @@ helm upgrade --install tearenv ./deploy/helm/tearenv \
 
 Set `service.type=LoadBalancer` to publish the SSH endpoint. Use `scaler.rbac.namespaces` for a known set of workload namespaces, or set `scaler.rbac.clusterWide=true` when the gateway must manage workloads throughout the cluster.
 
+Prometheus metrics are available from `/metrics` on the Service's `metrics` port. Set `metrics.enabled=false` to remove the metrics listener and Service port, or set `metrics.port` to change the port.
+
 See [the Kubernetes deployment guide](../../../docs/kubernetes-deployment.md) for policy setup, public-key authentication, upgrades, and troubleshooting.

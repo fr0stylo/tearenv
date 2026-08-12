@@ -57,6 +57,11 @@ spec:
           args:
             - serve
             - --listen=:2222
+            {{- if .Values.metrics.enabled }}
+            - --metrics-listen=:{{ .Values.metrics.port }}
+            {{- else }}
+            - --metrics-listen=
+            {{- end }}
             - --users=/var/lib/tearenv/users.json
             - --host-key=/var/lib/tearenv/ssh_host_ed25519_key
             {{- if .Values.scaler.kubernetes.enabled }}
@@ -69,6 +74,11 @@ spec:
             - name: ssh
               containerPort: 2222
               protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             tcpSocket:
               port: ssh

@@ -61,6 +61,7 @@ Run:
 ```sh
 ./bin/tearenvd serve \
   --listen :2222 \
+  --metrics-listen :9090 \
   --users /var/lib/tearenv/users.json \
   --host-key /var/lib/tearenv/ssh_host_ed25519_key
 ```
@@ -72,6 +73,45 @@ The startup log reports the bound address, credential path, scaler name, and pub
 To enable SSH public keys from a mounted Kubernetes Secret, pass `--authorized-keys` with the mounted `authorized_keys.json` path. Follow [the authentication guide](authentication.md) for the Secret format, client registration command, and required security controls.
 
 The process handles `SIGINT` and `SIGTERM`. On shutdown it closes the SSH listener and attempts to scale down workloads started by that process, allowing up to 30 seconds for each scaler call.
+
+## Scrape Prometheus metrics
+
+The daemon serves Prometheus metrics at `/metrics` on port `9090` by default. Set `--metrics-listen` to another address, or set it to an empty string to disable the HTTP listener:
+
+```sh
+tearenvd serve --metrics-listen 127.0.0.1:9090
+curl http://127.0.0.1:9090/metrics
+```
+
+The endpoint automatically includes Go runtime, process, and scrape-handler metrics. The tearenv collectors use bounded labels: they distinguish results, authentication methods, scale directions, and static versus managed services, but don't put identities, service aliases, targets, or workload names in labels.
+
+The metrics endpoint doesn't require authentication. Keep it on a private interface or cluster-internal Service, and restrict access with a firewall or NetworkPolicy when other workloads shouldn't see process telemetry.
+
+| Metric | What it shows |
+| --- | --- |
+| `tearenv_daemon_ready` | `1` after both configured listeners are bound; `0` during startup and shutdown. |
+| `tearenv_ssh_authentication_attempts_total` | Authentication attempts by `method` and `result`. |
+| `tearenv_ssh_handshake_failures_total` | Connections that failed before completing the SSH handshake. |
+| `tearenv_engine_service_catalog_requests_total` | Catalog requests by result. |
+| `tearenv_engine_service_open_attempts_total` | Service connection attempts by service type and result. |
+| `tearenv_engine_service_open_duration_seconds` | Time spent resolving policy, scaling managed workloads, waiting for readiness, and dialing targets. |
+| `tearenv_engine_active_connections` | Connections currently proxied through the engine. |
+| `tearenv_engine_scale_operations_total` | Scale-up and scale-down operations by result. |
+| `tearenv_engine_scale_operation_duration_seconds` | Scaler backend latency. |
+| `tearenv_engine_managed_workloads` | Workloads this daemon successfully scaled above zero and hasn't successfully scaled down. |
+
+For example, graph the 95th percentile managed-service startup latency with:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le) (
+    rate(tearenv_engine_service_open_duration_seconds_bucket{service_type="managed"}[5m])
+  )
+)
+```
+
+Alert separately on `scale_error`, `dial_error`, and `scaler_unavailable` results. They point to different operator actions: scaler permissions or backend health, target readiness or networking, and missing daemon scaler configuration.
 
 ## Add Kubernetes scale-to-zero
 
