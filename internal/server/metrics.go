@@ -32,6 +32,8 @@ type Metrics struct {
 	authenticationAttempts *prometheus.CounterVec
 	handshakeFailures      prometheus.Counter
 	catalogRequests        *prometheus.CounterVec
+	environmentProvisions  *prometheus.CounterVec
+	environmentDuration    *prometheus.HistogramVec
 	serviceOpens           *prometheus.CounterVec
 	serviceOpenDuration    *prometheus.HistogramVec
 	activeConnections      *prometheus.GaugeVec
@@ -66,6 +68,19 @@ func NewMetrics(registerer prometheus.Registerer) (*Metrics, error) {
 			Subsystem: "engine",
 			Name:      "service_catalog_requests_total",
 			Help:      "Total service catalog requests by result.",
+		}, []string{"result"}),
+		environmentProvisions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "tearenv",
+			Subsystem: "engine",
+			Name:      "environment_provision_attempts_total",
+			Help:      "Total authenticated environment reconciliation attempts by result.",
+		}, []string{"result"}),
+		environmentDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "tearenv",
+			Subsystem: "engine",
+			Name:      "environment_provision_duration_seconds",
+			Help:      "Time spent reconciling an authenticated identity environment.",
+			Buckets:   prometheus.DefBuckets,
 		}, []string{"result"}),
 		serviceOpens: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "tearenv",
@@ -112,6 +127,8 @@ func NewMetrics(registerer prometheus.Registerer) (*Metrics, error) {
 		metrics.authenticationAttempts,
 		metrics.handshakeFailures,
 		metrics.catalogRequests,
+		metrics.environmentProvisions,
+		metrics.environmentDuration,
 		metrics.serviceOpens,
 		metrics.serviceOpenDuration,
 		metrics.activeConnections,
@@ -154,6 +171,13 @@ func (metrics *Metrics) observeHandshakeFailure() {
 func (metrics *Metrics) observeCatalog(result string) {
 	if metrics != nil {
 		metrics.catalogRequests.WithLabelValues(result).Inc()
+	}
+}
+
+func (metrics *Metrics) observeEnvironmentProvision(result string, duration time.Duration) {
+	if metrics != nil {
+		metrics.environmentProvisions.WithLabelValues(result).Inc()
+		metrics.environmentDuration.WithLabelValues(result).Observe(duration.Seconds())
 	}
 }
 

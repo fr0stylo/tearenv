@@ -68,11 +68,15 @@ Don't run multiple uncoordinated gateway replicas against the same managed workl
 
 ## Keep environment blueprints under team control
 
-An environment blueprint contains Kubernetes resource templates. Treat permission to create or modify the team blueprint catalog as infrastructure-administration access, not ordinary developer access. Review images, commands, volumes, service accounts, security contexts, and network exposure before making a blueprint selectable.
+An environment blueprint contains Kubernetes resource templates. Treat permission to create or modify the mounted blueprint as infrastructure-administration access, not ordinary developer access. Review images, commands, volumes, service accounts, security contexts, and network exposure before enabling it.
 
-The planned environment request accepts a blueprint reference, not an identity. `tearenvd` must bind the request to the authenticated SSH identity and derive the namespace from that identity plus the selected blueprint name. Don't add a client-controlled identity field to this path.
+`tearenvd` provisions only after an authentication provider verifies the SSH identity. The server passes that verified identity directly to the environment manager and derives the namespace from it plus the operator-controlled blueprint name. The client can't supply an environment identity or namespace.
 
-Namespace separation is one layer, not the whole boundary. Apply ResourceQuota, LimitRange, RBAC, Pod Security admission, and NetworkPolicy appropriate for untrusted workloads. The current implementation initializes blueprint YAML but doesn't apply or authorize it yet.
+Blueprint provisioning needs cluster-wide permission to create namespaces and to create or patch the allowed namespaced resources. This is broader than scaler-only access. Restrict the ClusterRole to APIs used by reviewed blueprints, protect the gateway service account, use admission policy to constrain resulting workloads, and monitor Kubernetes audit logs.
+
+Namespace separation is one layer, not the whole boundary. Apply ResourceQuota, LimitRange, RBAC, Pod Security admission, and NetworkPolicy appropriate for developer workloads. Cluster-scoped blueprint objects are rejected, but a namespaced Secret, service account, or workload can still be sensitive.
+
+Server-side apply doesn't prune objects removed from a blueprint. Use a controlled deletion workflow so an old object can't remain unnoticed after a template change.
 
 ## Treat policy and logs as sensitive
 

@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,12 @@ import (
 	"github.com/fr0stylo/tearenv/internal/server"
 	"golang.org/x/crypto/ssh"
 )
+
+type loginHookFunc func(context.Context, string) error
+
+func (function loginHookFunc) Provision(ctx context.Context, identity string) error {
+	return function(ctx, identity)
+}
 
 func TestIdentityAuthorizedService(t *testing.T) {
 	target := startEchoServer(t)
@@ -145,6 +153,143 @@ func TestPublicKeyIdentityListsAuthorizedServices(t *testing.T) {
 	}
 	if len(catalog) != 1 || catalog[0].Name != "redis" {
 		t.Fatalf("catalog = %#v, want redis", catalog)
+	}
+}
+
+func TestSuccessfulAuthenticationProvisionsIdentityEnvironment(t *testing.T) {
+	credentials, err := authorization.NewCredentials(map[string]string{"alice": "alice-token-long-enough"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identities := make(chan string, 1)
+	signer := newSigner(t)
+	gateway, err := server.New(server.Config{
+		Authenticator: credentials,
+		Policy:        credentials,
+		Signer:        signer,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Provisioner: loginHookFunc(func(_ context.Context, identity string) error {
+			identities <- identity
+			return nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = gateway.Serve(ctx, listener) }()
+
+	_, err = client.ListServices(ctx, client.ServiceClientConfig{
+		ServerAddress: listener.Addr().String(),
+		Identity:      "alice",
+		Token:         "alice-token-long-enough",
+		HostKey:       ssh.FixedHostKey(signer.PublicKey()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case identity := <-identities:
+		if identity != "alice" {
+			t.Fatalf("provisioned identity = %q, want alice", identity)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("authentication did not provision the environment")
+	}
+}
+
+func TestProvisioningFailureRejectsAuthentication(t *testing.T) {
+	credentials, err := authorization.NewCredentials(map[string]string{"alice": "alice-token-long-enough"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("Kubernetes API unavailable")
+	signer := newSigner(t)
+	gateway, err := server.New(server.Config{
+		Authenticator: credentials,
+		Policy:        credentials,
+		Signer:        signer,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Provisioner:   loginHookFunc(func(context.Context, string) error { return want }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = gateway.Serve(ctx, listener) }()
+
+	_, err = client.ListServices(ctx, client.ServiceClientConfig{
+		ServerAddress: listener.Addr().String(),
+		Identity:      "alice",
+		Token:         "alice-token-long-enough",
+		HostKey:       ssh.FixedHostKey(signer.PublicKey()),
+	})
+	if err == nil {
+		t.Fatal("ListServices() succeeded after environment provisioning failed")
+	}
+}
+
+func TestInviteEnrollmentProvisionsBeforeConsumingInvite(t *testing.T) {
+	credentialsPath := filepath.Join(t.TempDir(), "users.json")
+	invite, err := authorization.CreateInvite(credentialsPath, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := authorization.LoadCredentials(credentialsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attempts atomic.Int32
+	signer := newSigner(t)
+	gateway, err := server.New(server.Config{
+		Authenticator: credentials,
+		Enrollment:    credentials,
+		Policy:        credentials,
+		Signer:        signer,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Provisioner: loginHookFunc(func(context.Context, string) error {
+			if attempts.Add(1) == 1 {
+				return errors.New("Kubernetes API unavailable")
+			}
+			return nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = gateway.Serve(ctx, listener) }()
+	config := client.EnrollmentConfig{
+		ServerAddress: listener.Addr().String(),
+		Identity:      "alice",
+		Invite:        invite,
+		HostKey:       ssh.FixedHostKey(signer.PublicKey()),
+	}
+
+	if _, err := client.Enroll(ctx, config); err == nil {
+		t.Fatal("Enroll() succeeded when environment provisioning failed")
+	}
+	token, err := client.Enroll(ctx, config)
+	if err != nil {
+		t.Fatalf("retry enrollment with same invite: %v", err)
+	}
+	if token == "" || attempts.Load() != 2 {
+		t.Fatalf("token = %q, provisioning attempts = %d", token, attempts.Load())
 	}
 }
 

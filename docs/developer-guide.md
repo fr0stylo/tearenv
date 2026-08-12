@@ -63,11 +63,13 @@ The catalog contains service aliases and suggested local ports, sorted by alias.
 
 An operator can add or replace grants while the gateway is running. Run `tearenv services` again to fetch current policy.
 
-## Expect team blueprint selection in a later release
+## Receive your team environment at login
 
-Teams can initialize reusable environment blueprints, but the current developer client can't list or request them yet. Operators still create identity-bound grants before services appear in `tearenv services`.
+When the operator enables a team blueprint, your invite login and every later SSH login reconcile a namespace for your authenticated identity. For example, identity `alice` and blueprint `web-development` use `tearenv-alice-web-development`. Another identity receives another namespace.
 
-The planned flow will let you select a team-approved blueprint by name. The gateway will use your authenticated identity to create a separate namespace for that selection. You won't send an identity in the environment request, and you won't upload or modify the team's blueprint.
+Blueprint services appear in `tearenv services` after reconciliation succeeds. You don't supply a namespace or upload Kubernetes resources. A provisioning error rejects the login instead of returning a partially available catalog.
+
+The current gateway applies one operator-configured blueprint automatically. Selecting one of several team templates from the developer client isn't implemented yet.
 
 ## Connect all services on suggested ports
 

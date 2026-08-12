@@ -38,18 +38,18 @@ tearenv -- authenticated SSH --> tearenvd
 
 An `EnvironmentBlueprint` moves the repeated Kubernetes shape into a team-owned definition. The blueprint contains resource templates, exposed services, and scale policies. It doesn't contain the identity that will run it.
 
-The planned request flow lets an authenticated developer select a blueprint by `metadata.name`. `tearenvd` takes the identity from the authenticated SSH session and combines it with the selected blueprint name. A request won't be able to override that identity.
+When `tearenvd` starts with `--blueprint`, a successful SSH authentication triggers Kubernetes reconciliation before the login is accepted. `tearenvd` takes the identity from the verified SSH session and combines it with the configured blueprint name. The client can't override that identity or namespace.
 
-Each environment namespace includes both values, such as `tearenv-alice-web-development`. Alice can select another team blueprint without colliding with her existing environment, and Bob receives a separate namespace when he selects the same blueprint.
+Each environment namespace includes both values, such as `tearenv-alice-web-development`. Bob receives a separate namespace when he logs in to the same gateway. Blueprint services are added to that identity's catalog and use the existing connection-driven scale engine.
 
-Blueprint initialization is implemented. Catalog storage, authorization, resource reconciliation, and developer requests aren't implemented yet, so the current connection flow still starts from operator-created service grants.
+The current daemon has one configured blueprint and applies it automatically. A future catalog and request protocol can let a developer choose among multiple team-approved blueprints without changing the identity boundary.
 
 ## Follow a connection through the gateway
 
 1. An operator creates a one-time invite and grants one or more aliases to its identity.
 2. The developer verifies the gateway's SSH host key and redeems the invite.
 3. `tearenv` saves a personal token in an owner-only local profile.
-4. `tearenv services` authenticates and requests the identity's public catalog.
+4. `tearenv services` authenticates. If a blueprint is configured, `tearenvd` reconciles the identity namespace and resources before returning the catalog.
 5. `tearenv connect` authenticates, binds local listeners, and waits.
 6. A local application opens a TCP connection. `tearenv` requests the alias with port zero over an SSH `direct-tcpip` channel.
 7. `tearenvd` resolves the alias against current server policy. The client can't substitute a hostname or port.

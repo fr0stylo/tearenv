@@ -164,7 +164,28 @@ Spaces, uppercase letters, underscores, and names longer than a Kubernetes DNS l
 
 ### `kubectl apply` doesn't recognize `EnvironmentBlueprint`
 
-An `EnvironmentBlueprint` is tearenv configuration, not a Kubernetes CRD. Don't pass the generated file to `kubectl`. Catalog storage and resource reconciliation aren't implemented yet, so keep the file in team-controlled configuration storage for the future provisioner.
+An `EnvironmentBlueprint` is tearenv configuration, not a Kubernetes CRD. Don't pass the generated file to `kubectl`. Mount it into the `tearenvd` pod and pass its path with `--blueprint`.
+
+### Login fails after authentication when a blueprint is enabled
+
+Look for `client environment provisioning failed` in the gateway logs. The error names the resource that discovery or server-side apply couldn't process.
+
+Confirm that the service account can create namespaces and apply every resource type in the blueprint:
+
+```sh
+kubectl auth can-i create namespaces \
+  --as=system:serviceaccount:tearenv-system:tearenvd
+
+kubectl auth can-i patch deployments.apps \
+  --as=system:serviceaccount:tearenv-system:tearenvd \
+  -n tearenv-alice-developer-environment
+```
+
+Also check that every blueprint resource is namespace-scoped. `ClusterRole`, `ClusterRoleBinding`, `Namespace`, and other cluster-scoped resources aren't accepted in `spec.resources`.
+
+### A removed blueprint resource still exists
+
+Reconciliation creates and patches resources but doesn't prune them. Delete the retired object through an operator-controlled workflow after confirming that no developer session still needs it.
 
 ## Fix target and scaling failures
 

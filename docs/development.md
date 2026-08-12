@@ -10,11 +10,12 @@ cmd/tearenvd/        gateway and administrative CLI
 internal/client/     enrollment, catalog, SSH connection, and local listeners
 internal/authorization/ authentication providers, credentials, invites, and service policy
 internal/blueprint/  team blueprint schema, starter document, strict loading, and validation
+internal/environment/ authenticated provisioning and blueprint-backed service policy
 internal/profile/    protected client profile persistence
 internal/protocol/   shared SSH request names and public catalog types
 internal/server/     SSH transport, host keys, proxy channels, and lifecycle
 internal/scaler/     backend-neutral scale interface
-internal/kube/       in-cluster scaler and authorized-key Secret updates
+internal/kube/       in-cluster scaler, blueprint apply, and authorized-key Secret updates
 internal/proxy/      bidirectional stream copying
 e2e/                 compiled-binary and Kind scenarios
 deploy/helm/         installable Helm chart
@@ -26,7 +27,7 @@ Authentication providers implement `authorization.Authenticator` and can be comp
 
 Runtime backends implement `scaler.Backend`. A new backend receives a workload kind, namespace-like scope, name, and replica count. The lifecycle gateway owns connection tracking, readiness polling, and idle timers independently of the backend.
 
-Environment blueprint changes belong in `internal/blueprint`. Keep the versioned schema independent of authenticated environment requests: team operators own blueprint definitions, while the future request path supplies only a blueprint reference and gets identity from the authenticated server context.
+Environment schema and rendering changes belong in `internal/blueprint`. `internal/environment` joins the rendered instance to authorization policy, while `internal/kube` applies namespace-scoped resources. Keep identity server-controlled: the authentication hook passes the verified SSH identity directly to the manager.
 
 ## Run the standard checks
 
@@ -61,7 +62,7 @@ Install Docker, Kind, kubectl, and Go, and make sure the Docker daemon is runnin
 make e2e-kind
 ```
 
-The opt-in test creates a disposable Kind cluster and local image. It checks identity-specific routing for two developers, zero-replica startup, concurrent request bursts, repeat cold starts, idle downscale, and pod removal. It isn't included in `make check` or ordinary `go test ./...` because it creates containers and a cluster.
+The opt-in test creates a disposable Kind cluster and local image. It checks per-identity blueprint namespace creation, identity-specific routing for two developers, zero-replica startup, concurrent request bursts, repeat cold starts, idle downscale, and pod removal. It isn't included in `make check` or ordinary `go test ./...` because it creates containers and a cluster.
 
 Retain a failed cluster for inspection:
 
@@ -73,7 +74,7 @@ The test prints the retained kubectl context. Without that variable, cleanup del
 
 ## Add behavior with focused tests
 
-Authentication, credential, and policy changes belong in `internal/authorization`. Blueprint schema and reference validation belong in `internal/blueprint/blueprint_test.go`. Lifecycle timing and shared-workload activity belong in `internal/server/lifecycle_test.go`. Kubernetes API behavior belongs in `internal/kube`, which uses injected clients. Client/server integration belongs in `internal/client/integration_test.go`; binary behavior belongs in `e2e/e2e_test.go`.
+Authentication, credential, and policy changes belong in `internal/authorization`. Blueprint rendering belongs in `internal/blueprint/blueprint_test.go`, and provisioning policy belongs in `internal/environment/manager_test.go`. Lifecycle timing and shared-workload activity belong in `internal/server/lifecycle_test.go`. Kubernetes API behavior belongs in `internal/kube`, which uses injected clients. Client/server integration belongs in `internal/client/integration_test.go`; binary behavior belongs in `e2e/e2e_test.go`.
 
 Use short idle and readiness durations only in tests. Production defaults and examples should remain realistic and shouldn't make correctness depend on tight scheduler timing.
 

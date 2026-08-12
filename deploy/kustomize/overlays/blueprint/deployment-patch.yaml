@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tearenvd
+  namespace: tearenv-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: tearenvd
+          args:
+            - serve
+            - --listen=:2222
+            - --metrics-listen=:9090
+            - --users=/var/lib/tearenv/users.json
+            - --host-key=/var/lib/tearenv/ssh_host_ed25519_key
+            - --scaler=kubernetes
+            - --blueprint=/etc/tearenv/blueprint/environment-blueprint.yaml
+          volumeMounts:
+            - name: blueprint
+              mountPath: /etc/tearenv/blueprint
+              readOnly: true
+      volumes:
+        - name: blueprint
+          configMap:
+            name: tearenv-blueprint
+            items:
+              - key: environment-blueprint.yaml
+                path: environment-blueprint.yaml

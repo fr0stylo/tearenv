@@ -19,7 +19,7 @@ func TestRootCommandExposesGatewayWorkflow(t *testing.T) {
 		flags []string
 	}{
 		{path: []string{"serve"}, flags: []string{
-			"listen", "metrics-listen", "host-key", "users", "authorized-keys", "scaler", "kubernetes",
+			"listen", "metrics-listen", "host-key", "users", "authorized-keys", "blueprint", "scaler", "kubernetes",
 		}},
 		{path: []string{"invite"}, flags: []string{"users", "identity"}},
 		{path: []string{"service", "grant"}, flags: []string{

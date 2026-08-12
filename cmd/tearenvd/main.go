@@ -16,6 +16,7 @@ import (
 
 	"github.com/fr0stylo/tearenv/internal/authorization"
 	"github.com/fr0stylo/tearenv/internal/blueprint"
+	"github.com/fr0stylo/tearenv/internal/environment"
 	"github.com/fr0stylo/tearenv/internal/kube"
 	"github.com/fr0stylo/tearenv/internal/scaler"
 	"github.com/fr0stylo/tearenv/internal/server"
@@ -63,6 +64,7 @@ type serveOptions struct {
 	hostKeyPath        string
 	usersPath          string
 	authorizedKeysPath string
+	blueprintPath      string
 	scalerName         string
 	kubernetes         bool
 }
@@ -249,6 +251,7 @@ func newServeCommand() *cobra.Command {
 	flags.StringVar(&options.hostKeyPath, "host-key", options.hostKeyPath, "persistent SSH host private key")
 	flags.StringVar(&options.usersPath, "users", options.usersPath, "authentication credentials and access policy JSON file")
 	flags.StringVar(&options.authorizedKeysPath, "authorized-keys", "", "identity-bound SSH public keys JSON file (for example, a mounted Kubernetes Secret)")
+	flags.StringVar(&options.blueprintPath, "blueprint", "", "team environment blueprint provisioned for every authenticated identity")
 	flags.StringVar(&options.scalerName, "scaler", "", "workload scaler backend (supported: kubernetes)")
 	flags.BoolVar(&options.kubernetes, "kubernetes", false, "deprecated alias for --scaler kubernetes")
 	if err := flags.MarkDeprecated("kubernetes", "use --scaler kubernetes instead"); err != nil {
@@ -293,11 +296,37 @@ func serve(ctx context.Context, options serveOptions) error {
 	if err != nil {
 		return err
 	}
-	gateway := server.NewLifecycleGateway(credentials, backend, slog.Default(), server.WithMetrics(metrics))
+	var policy authorization.Policy = credentials
+	var provisioner server.EnvironmentProvisioner
+	if options.blueprintPath != "" {
+		if selectedScaler != "kubernetes" {
+			return errors.New("--blueprint requires --scaler kubernetes")
+		}
+		contents, err := os.ReadFile(options.blueprintPath)
+		if err != nil {
+			return fmt.Errorf("read environment blueprint %q: %w", options.blueprintPath, err)
+		}
+		document, err := blueprint.Load(contents)
+		if err != nil {
+			return fmt.Errorf("load environment blueprint %q: %w", options.blueprintPath, err)
+		}
+		applier, err := kube.NewInClusterBlueprintApplier()
+		if err != nil {
+			return fmt.Errorf("configure Kubernetes blueprint provisioner: %w", err)
+		}
+		manager, err := environment.NewManager(document, applier, credentials)
+		if err != nil {
+			return fmt.Errorf("configure environment manager: %w", err)
+		}
+		policy = manager
+		provisioner = manager
+	}
+	gateway := server.NewLifecycleGateway(policy, backend, slog.Default(), server.WithMetrics(metrics))
 	tunnelServer, err := server.New(server.Config{
 		Authenticator: authenticator,
 		Enrollment:    credentials,
-		Policy:        credentials,
+		Policy:        policy,
+		Provisioner:   provisioner,
 		Signer:        signer,
 		Gateway:       gateway,
 		Metrics:       metrics,
@@ -334,6 +363,7 @@ func serve(ctx context.Context, options serveOptions) error {
 		"metrics", metricsListener.Addr(),
 		"users", options.usersPath,
 		"authorized_keys", options.authorizedKeysPath,
+		"blueprint", options.blueprintPath,
 		"scaler", selectedScaler,
 		"host_key_fingerprint", ssh.FingerprintSHA256(signer.PublicKey()),
 	)
@@ -374,6 +404,7 @@ func serveSSH(
 		"metrics", metricsAddress,
 		"users", options.usersPath,
 		"authorized_keys", options.authorizedKeysPath,
+		"blueprint", options.blueprintPath,
 		"scaler", selectedScaler,
 		"host_key_fingerprint", ssh.FingerprintSHA256(signer.PublicKey()),
 	)

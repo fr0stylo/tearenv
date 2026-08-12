@@ -28,6 +28,37 @@ subjects:
     name: tearenvd
     namespace: tearenv-e2e
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tearenvd-environments
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tearenvd-environments
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tearenvd-environments
+subjects:
+  - kind: ServiceAccount
+    name: tearenvd
+    namespace: tearenv-e2e
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -59,6 +90,8 @@ spec:
             - /etc/tearenv/users.json
             - --scaler
             - kubernetes
+            - --blueprint
+            - /etc/tearenv/blueprint.yaml
           ports:
             - name: ssh
               containerPort: 2222

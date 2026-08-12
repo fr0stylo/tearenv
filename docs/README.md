@@ -9,7 +9,7 @@ Start with the guide that matches what you're doing:
 - [Use tearenv as a developer](developer-guide.md) covers login, service discovery, local port selection, profiles, and day-to-day use.
 - [Choose an authentication method](authentication.md) covers invite tokens, Kubernetes-managed public keys, security constraints, and the OIDC extension point.
 - [Run tearenvd](operator-guide.md) covers identities, grants, static services, Kubernetes scaling, storage, and operations.
-- [Define reusable team environments](environment-blueprints.md) covers the blueprint schema, namespace isolation, service declarations, and the planned selection boundary.
+- [Define reusable team environments](environment-blueprints.md) covers the blueprint schema, per-identity provisioning, namespace isolation, service declarations, and RBAC.
 - [Deploy on Kubernetes](kubernetes-deployment.md) covers the container image, Helm chart, Kustomize overlays, persistence, and scaler RBAC.
 - [Look up commands and file formats](reference.md) documents every CLI option, environment variable, default, naming rule, and data file.
 - [Diagnose a problem](troubleshooting.md) maps common errors and symptoms to checks and fixes.
@@ -23,12 +23,12 @@ The repository builds two binaries:
 | Program    | Audience   | Purpose                                                                           |
 | ---------- | ---------- | --------------------------------------------------------------------------------- |
 | `tearenv`  | Developers | Redeems an invite, lists authorized services, and opens local TCP listeners.      |
-| `tearenvd` | Operators  | Runs the SSH gateway, manages invites and grants, and initializes team blueprints. |
+| `tearenvd` | Operators  | Runs the SSH gateway, manages access, and provisions team blueprints.              |
 
 `tearenv` is not an SSH shell, VPN, or network overlay. It exposes only the aliases granted to the authenticated identity. `tearenvd` resolves those aliases to server-side targets that never appear in the client catalog.
 
 ## Check the current limitations
 
-The current CLI can create or replace invites, register Kubernetes public keys, create or replace service grants, and initialize blueprint YAML. It doesn't yet store a blueprint catalog, apply blueprint resources, or let developers request an environment. It also doesn't include commands to list identities, remove a public key, revoke an identity, remove a grant, or inspect the policy store. Treat `.data/users.json` as protected application state, back it up, and use a controlled maintenance procedure if you need to remove records manually.
+The current CLI can create or replace invites, register Kubernetes public keys, create or replace service grants, initialize blueprint YAML, and reconcile one configured blueprint at login. It doesn't yet store a multi-blueprint catalog or let developers select a template. It also doesn't include commands to list identities, remove a public key, revoke an identity, remove a grant, or inspect the policy store. Treat `.data/users.json` as protected application state, back it up, and use a controlled maintenance procedure if you need to remove records manually.
 
 Only the Kubernetes scaler is included. Static targets need no scaler. Docker, containerd, and other runtimes would require another implementation of the scaler interface.

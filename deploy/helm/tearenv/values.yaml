@@ -41,6 +41,14 @@ publicKeys:
   existingSecret: ""
   secretKey: authorized_keys.json
 
+blueprint:
+  enabled: false
+  # Set existingConfigMap to a team-managed ConfigMap in production.
+  existingConfigMap: ""
+  configMapKey: environment-blueprint.yaml
+  # Used to create a ConfigMap when existingConfigMap is empty.
+  document: ""
+
 persistence:
   enabled: true
   existingClaim: ""

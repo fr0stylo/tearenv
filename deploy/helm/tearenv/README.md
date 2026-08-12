@@ -25,4 +25,6 @@ Set `service.type=LoadBalancer` to publish the SSH endpoint. Use `scaler.rbac.na
 
 Prometheus metrics are available from `/metrics` on the Service's `metrics` port. Set `metrics.enabled=false` to remove the metrics listener and Service port, or set `metrics.port` to change the port.
 
+To create one environment namespace per authenticated identity, put a reviewed `EnvironmentBlueprint` in a ConfigMap and install with `blueprint.enabled=true` and `blueprint.existingConfigMap=NAME`. The chart mounts the file and grants cluster-wide create and patch access for common namespaced blueprint resources. Check [the environment blueprint guide](../../../docs/environment-blueprints.md) before enabling these permissions.
+
 See [the Kubernetes deployment guide](../../../docs/kubernetes-deployment.md) for policy setup, public-key authentication, upgrades, and troubleshooting.

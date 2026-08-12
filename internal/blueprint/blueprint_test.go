@@ -3,6 +3,8 @@ package blueprint
 import (
 	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 func TestDefaultCreatesIsolatedScalableEnvironment(t *testing.T) {
@@ -59,6 +61,58 @@ func TestMarshalAndLoadRoundTrip(t *testing.T) {
 	}
 	if got.Metadata.Name != want.Metadata.Name || len(got.Spec.Resources) != len(want.Spec.Resources) {
 		t.Fatalf("loaded blueprint = %#v, want %#v", got, want)
+	}
+}
+
+func TestInstantiateRendersAnIsolatedIdentityNamespace(t *testing.T) {
+	document := Default("web-development")
+
+	instance, err := document.Instantiate("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instance.Namespace != "tearenv-alice-web-development" {
+		t.Fatalf("namespace = %q, want tearenv-alice-web-development", instance.Namespace)
+	}
+	if instance.Labels["tearenv.io/identity"] != "alice" {
+		t.Fatalf("identity label = %q, want alice", instance.Labels["tearenv.io/identity"])
+	}
+	for index, resource := range instance.Resources {
+		metadata, _ := resource["metadata"].(map[string]any)
+		if metadata["namespace"] != instance.Namespace {
+			t.Errorf("resource %d namespace = %q, want %q", index, metadata["namespace"], instance.Namespace)
+		}
+	}
+}
+
+func TestInstantiateCreatesDistinctDNSNamesForNormalizedIdentities(t *testing.T) {
+	document := Default("developer-environment")
+	identities := []string{"Alice", "alice", "alice@example.com", strings.Repeat("a", 64)}
+	namespaces := make(map[string]string, len(identities))
+	for _, identity := range identities {
+		instance, err := document.Instantiate(identity)
+		if err != nil {
+			t.Fatalf("Instantiate(%q): %v", identity, err)
+		}
+		if problems := validation.IsDNS1123Label(instance.Namespace); len(problems) != 0 {
+			t.Errorf("Instantiate(%q) namespace %q is invalid: %v", identity, instance.Namespace, problems)
+		}
+		if previous, duplicate := namespaces[instance.Namespace]; duplicate {
+			t.Errorf("identities %q and %q received namespace %q", previous, identity, instance.Namespace)
+		}
+		namespaces[instance.Namespace] = identity
+	}
+}
+
+func TestInstantiateDoesNotMutateBlueprintResources(t *testing.T) {
+	document := Default("developer-environment")
+
+	if _, err := document.Instantiate("alice"); err != nil {
+		t.Fatal(err)
+	}
+	metadata := document.Spec.Resources[0]["metadata"].(map[string]any)
+	if _, exists := metadata["namespace"]; exists {
+		t.Fatal("Instantiate added metadata.namespace to the team blueprint")
 	}
 }
 

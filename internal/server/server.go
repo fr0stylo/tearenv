@@ -19,10 +19,17 @@ type Config struct {
 	Authenticator authorization.Authenticator
 	Enrollment    authorization.Enrollment
 	Policy        authorization.Policy
+	Provisioner   EnvironmentProvisioner
 	Signer        ssh.Signer
 	Logger        *slog.Logger
 	Gateway       ServiceGateway
 	Metrics       *Metrics
+}
+
+// EnvironmentProvisioner reconciles resources for a verified identity before
+// the SSH login is accepted.
+type EnvironmentProvisioner interface {
+	Provision(ctx context.Context, identity string) error
 }
 
 type Server struct {
@@ -52,6 +59,21 @@ func New(config Config) (*Server, error) {
 	if config.Enrollment != nil {
 		requestHandlers[protocol.EnrollRequestType] = enrollmentHandler(config.Enrollment, config.Logger)
 	}
+	provisionEnvironment := func(ctx gliderssh.Context, identity string, method authorization.Method) bool {
+		if config.Provisioner == nil {
+			return true
+		}
+		started := time.Now()
+		if err := config.Provisioner.Provision(ctx, identity); err != nil {
+			config.Metrics.observeEnvironmentProvision(metricResultError, time.Since(started))
+			config.Metrics.observeAuthentication(method, metricResultError)
+			config.Logger.Warn("client environment provisioning failed",
+				"identity", identity, "method", method, "remote", ctx.RemoteAddr(), "error", err)
+			return false
+		}
+		config.Metrics.observeEnvironmentProvision(metricResultSuccess, time.Since(started))
+		return true
+	}
 	authenticate := func(ctx gliderssh.Context, attempt authorization.Attempt) bool {
 		result, authenticated, err := config.Authenticator.Authenticate(ctx, attempt)
 		if err != nil {
@@ -64,6 +86,9 @@ func New(config Config) (*Server, error) {
 			config.Metrics.observeAuthentication(attempt.Method, metricResultRejected)
 			config.Logger.Warn("client authentication rejected",
 				"identity", attempt.Identity, "method", attempt.Method, "remote", ctx.RemoteAddr())
+			return false
+		}
+		if !provisionEnvironment(ctx, result.Identity, attempt.Method) {
 			return false
 		}
 		config.Metrics.observeAuthentication(attempt.Method, metricResultSuccess)
@@ -82,16 +107,20 @@ func New(config Config) (*Server, error) {
 		PasswordHandler: func(ctx gliderssh.Context, password string) bool {
 			identity := ctx.User()
 			if enrollmentIdentity, enrollment := protocol.EnrollmentIdentity(identity); enrollment {
+				method := authorization.Method("enrollment")
 				authenticated := config.Enrollment != nil && config.Enrollment.AuthenticateInvite(enrollmentIdentity, password)
-				if authenticated {
-					config.Metrics.observeAuthentication(authorization.Method("enrollment"), metricResultSuccess)
-					ctx.SetValue(enrollmentContextKey{}, enrollmentAttempt{Identity: enrollmentIdentity, Invite: password})
-					config.Logger.Info("client enrollment authenticated", "identity", enrollmentIdentity, "remote", ctx.RemoteAddr())
-				} else {
-					config.Metrics.observeAuthentication(authorization.Method("enrollment"), metricResultRejected)
+				if !authenticated {
+					config.Metrics.observeAuthentication(method, metricResultRejected)
 					config.Logger.Warn("client enrollment rejected", "identity", enrollmentIdentity, "remote", ctx.RemoteAddr())
+					return false
 				}
-				return authenticated
+				if !provisionEnvironment(ctx, enrollmentIdentity, method) {
+					return false
+				}
+				config.Metrics.observeAuthentication(method, metricResultSuccess)
+				ctx.SetValue(enrollmentContextKey{}, enrollmentAttempt{Identity: enrollmentIdentity, Invite: password})
+				config.Logger.Info("client enrollment authenticated", "identity", enrollmentIdentity, "remote", ctx.RemoteAddr())
+				return true
 			}
 
 			return authenticate(ctx, authorization.Attempt{

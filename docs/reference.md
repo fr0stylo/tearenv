@@ -63,9 +63,9 @@ Running `tearenvd` without a subcommand displays help. Use `tearenvd serve` to s
 
 ### `tearenvd blueprint init`
 
-Writes a team-owned `tearenv.io/v1alpha1` `EnvironmentBlueprint` to standard output. Redirect it to a file, then edit the reusable Kubernetes resources and service policies that authenticated identities will select through the planned catalog.
+Writes a team-owned `tearenv.io/v1alpha1` `EnvironmentBlueprint` to standard output. Redirect it to a file, then edit the reusable Kubernetes resources and service policies that the gateway will provision for authenticated identities.
 
-The generated file is tearenv configuration, not a Kubernetes CRD. The command doesn't contact Kubernetes, persist a catalog, or make the blueprint available to developers.
+The generated file is tearenv configuration, not a Kubernetes CRD. The command doesn't contact Kubernetes. Pass the reviewed file to `tearenvd serve --blueprint` to enable provisioning.
 
 | Option   | Default                 | Meaning                  |
 | -------- | ----------------------- | ------------------------ |
@@ -100,15 +100,18 @@ Durations use Go syntax such as `500ms`, `30s`, `2m`, or `1h30m`. Negative timeo
 
 ### `tearenvd serve`
 
-| Option              | Default                      | Meaning                                                        |
-| ------------------- | ---------------------------- | -------------------------------------------------------------- |
-| `--listen`          | `:2222`                      | SSH listen address.                                            |
-| `--metrics-listen`  | `:9090`                      | Prometheus HTTP listen address; an empty value disables it.    |
-| `--host-key`        | `.data/ssh_host_ed25519_key` | Persistent SSH private host key.                               |
-| `--users`           | `.data/users.json`           | Credential and policy file.                                    |
-| `--authorized-keys` | None                         | Identity-bound public-key JSON, usually from a mounted Secret. |
-| `--scaler`          | None                         | Scaler backend. The included value is `kubernetes`.            |
-| `--kubernetes`      | `false`                      | Deprecated alias for `--scaler kubernetes`.                    |
+| Option              | Default                      | Meaning                                                                  |
+| ------------------- | ---------------------------- | ------------------------------------------------------------------------ |
+| `--listen`          | `:2222`                      | SSH listen address.                                                      |
+| `--metrics-listen`  | `:9090`                      | Prometheus HTTP listen address; an empty value disables it.              |
+| `--host-key`        | `.data/ssh_host_ed25519_key` | Persistent SSH private host key.                                         |
+| `--users`           | `.data/users.json`           | Credential and policy file.                                              |
+| `--authorized-keys` | None                         | Identity-bound public-key JSON, usually from a mounted Secret.           |
+| `--blueprint`       | None                         | Team blueprint reconciled for every successfully authenticated identity. |
+| `--scaler`          | None                         | Scaler backend. The included value is `kubernetes`.                      |
+| `--kubernetes`      | `false`                      | Deprecated alias for `--scaler kubernetes`.                              |
+
+`--blueprint` requires `--scaler kubernetes` and in-cluster Kubernetes credentials. The daemon loads and validates the file at startup. Invite enrollment, token authentication, and public-key authentication all apply the identity namespace and resources before accepting the SSH login. A failed enrollment reconciliation doesn't consume the invite.
 
 ## Understand the client profile
 

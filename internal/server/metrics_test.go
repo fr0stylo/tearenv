@@ -21,6 +21,7 @@ func TestMetricsRecordsDaemonEvents(t *testing.T) {
 	metrics.observeAuthentication(authorization.MethodPassword, metricResultSuccess)
 	metrics.observeAuthentication(authorization.MethodPassword, metricResultRejected)
 	metrics.observeCatalog(metricResultSuccess)
+	metrics.observeEnvironmentProvision(metricResultSuccess, 20*time.Millisecond)
 	metrics.observeHandshakeFailure()
 
 	if got := testutil.ToFloat64(metrics.authenticationAttempts.WithLabelValues("password", metricResultSuccess)); got != 1 {
@@ -31,6 +32,9 @@ func TestMetricsRecordsDaemonEvents(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(metrics.catalogRequests.WithLabelValues(metricResultSuccess)); got != 1 {
 		t.Fatalf("successful catalog requests = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(metrics.environmentProvisions.WithLabelValues(metricResultSuccess)); got != 1 {
+		t.Fatalf("successful environment provisions = %v, want 1", got)
 	}
 	if got := testutil.ToFloat64(metrics.handshakeFailures); got != 1 {
 		t.Fatalf("handshake failures = %v, want 1", got)

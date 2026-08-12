@@ -93,6 +93,8 @@ The metrics endpoint doesn't require authentication. Keep it on a private interf
 | `tearenv_ssh_authentication_attempts_total` | Authentication attempts by `method` and `result`. |
 | `tearenv_ssh_handshake_failures_total` | Connections that failed before completing the SSH handshake. |
 | `tearenv_engine_service_catalog_requests_total` | Catalog requests by result. |
+| `tearenv_engine_environment_provision_attempts_total` | Login-time environment reconciliations by result. |
+| `tearenv_engine_environment_provision_duration_seconds` | Kubernetes namespace and resource reconciliation latency. |
 | `tearenv_engine_service_open_attempts_total` | Service connection attempts by service type and result. |
 | `tearenv_engine_service_open_duration_seconds` | Time spent resolving policy, scaling managed workloads, waiting for readiness, and dialing targets. |
 | `tearenv_engine_active_connections` | Connections currently proxied through the engine. |
@@ -163,7 +165,7 @@ If multiple aliases belong to the same workload, give them the same workload kin
 
 Static grants can coexist with scaled grants. Starting without `--scaler` keeps static services working, but every grant with workload metadata fails when a developer tries to connect.
 
-## Initialize a reusable team environment blueprint
+## Provision a team environment at login
 
 Generate the first versioned environment blueprint with:
 
@@ -171,7 +173,19 @@ Generate the first versioned environment blueprint with:
 tearenvd blueprint init > environment-blueprint.yaml
 ```
 
-The team owns the blueprint and will make it available for authenticated identities to select through the planned catalog. The blueprint describes a namespace derived from both identity and blueprint name, namespaced Kubernetes resources, exposed services, and their scale-up and scale-down policy. Initialization doesn't apply resources to Kubernetes yet. See [the environment blueprint guide](environment-blueprints.md) for the schema and provisioning boundary.
+Review the generated resources, mount the file into the gateway pod, and start the in-cluster daemon with:
+
+```sh
+tearenvd serve \
+  --users /var/lib/tearenv/users.json \
+  --host-key /var/lib/tearenv/ssh_host_ed25519_key \
+  --scaler kubernetes \
+  --blueprint /etc/tearenv/environment-blueprint.yaml
+```
+
+Every successful token or public-key authentication reconciles a namespace derived from the verified identity and blueprint name. `tearenvd` uses server-side apply for the namespace and namespaced resources. After reconciliation, the declared services appear in that identity's catalog and use the existing scale-to-zero lifecycle.
+
+Provisioning errors reject the SSH login. The current daemon accepts one blueprint and applies it to every authenticated identity; developer selection among several team templates isn't implemented yet. See [the environment blueprint guide](environment-blueprints.md) for the schema, RBAC, and reconciliation limits.
 
 ## Use writable persistent state in Kubernetes
 

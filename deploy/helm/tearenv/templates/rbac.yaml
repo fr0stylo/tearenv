@@ -1,5 +1,46 @@
-{{- if and .Values.scaler.kubernetes.enabled .Values.scaler.rbac.create }}
-{{- if .Values.scaler.rbac.clusterWide }}
+{{- if and .Values.scaler.rbac.create (or .Values.scaler.kubernetes.enabled .Values.blueprint.enabled) }}
+{{- if .Values.blueprint.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ printf "%s-%s-environments" .Release.Namespace (include "tearenv.fullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "tearenv.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps", "persistentvolumeclaims", "secrets", "serviceaccounts", "services"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "update"]
+  - apiGroups: ["batch"]
+    resources: ["cronjobs", "jobs"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-%s-environments" .Release.Namespace (include "tearenv.fullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "tearenv.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ printf "%s-%s-environments" .Release.Namespace (include "tearenv.fullname" .) | trunc 63 | trimSuffix "-" }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "tearenv.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- else if .Values.scaler.rbac.clusterWide }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

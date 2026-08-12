@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../default
+  - environment-rbac.yaml
+
+configMapGenerator:
+  - name: tearenv-blueprint
+    namespace: tearenv-system
+    files:
+      - environment-blueprint.yaml
+
+patches:
+  - path: deployment-patch.yaml

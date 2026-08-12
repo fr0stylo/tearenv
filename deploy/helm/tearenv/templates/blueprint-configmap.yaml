@@ -1,0 +1,11 @@
+{{- if and .Values.blueprint.enabled (not .Values.blueprint.existingConfigMap) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tearenv.blueprintConfigMapName" . }}
+  labels:
+    {{- include "tearenv.labels" . | nindent 4 }}
+data:
+  {{ .Values.blueprint.configMapKey }}: |
+    {{- required "blueprint.document is required when blueprint.enabled is true and blueprint.existingConfigMap is empty" .Values.blueprint.document | nindent 4 }}
+{{- end }}

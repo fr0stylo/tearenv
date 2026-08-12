@@ -1,6 +1,6 @@
 # tearenv
 
-`tearenv` gives developers secure localhost access to private TCP services. The `tearenvd` gateway authorizes service names, hides private targets, and can scale Kubernetes workloads up on connection and down after inactivity. Teams can also initialize reusable Kubernetes environment blueprints that will become the catalog developers select from.
+`tearenv` gives developers secure localhost access to private TCP services. The `tearenvd` gateway authorizes service names, hides private targets, and can scale Kubernetes workloads up on connection and down after inactivity. A team blueprint can also create an isolated Kubernetes namespace and service environment for each authenticated developer.
 
 ```text
 local app -> localhost -> tearenv -> SSH -> tearenvd -> private service
@@ -9,7 +9,7 @@ local app -> localhost -> tearenv -> SSH -> tearenvd -> private service
 The repository builds two programs:
 
 - `tearenv` logs in, lists granted services, and opens local ports.
-- `tearenvd` runs the gateway, creates invites, and grants services.
+- `tearenvd` runs the gateway, creates invites, grants services, and provisions team blueprints.
 
 ## Build the binaries
 
@@ -58,7 +58,15 @@ Initialize a team-owned environment blueprint:
   > web-development.yaml
 ```
 
-Blueprint initialization is available now. Applying a blueprint and requesting one from the developer client are the next implementation slice.
+Mount the reviewed file into the gateway pod, then start `tearenvd` with Kubernetes scaling and blueprint provisioning:
+
+```sh
+./bin/tearenvd serve \
+  --scaler kubernetes \
+  --blueprint /etc/tearenv/web-development.yaml
+```
+
+Each successful SSH login reconciles a separate namespace for that authenticated identity. The current daemon configures one blueprint; choosing among multiple team templates from the developer client is still planned.
 
 ## Connect as a developer
 

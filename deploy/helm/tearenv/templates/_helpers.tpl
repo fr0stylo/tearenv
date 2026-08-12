@@ -38,3 +38,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "tearenv.stateClaimName" -}}
 {{- default (printf "%s-state" (include "tearenv.fullname" .)) .Values.persistence.existingClaim }}
 {{- end }}
+
+{{- define "tearenv.blueprintConfigMapName" -}}
+{{- default (printf "%s-blueprint" (include "tearenv.fullname" .)) .Values.blueprint.existingConfigMap }}
+{{- end }}

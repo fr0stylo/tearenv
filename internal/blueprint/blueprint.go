@@ -2,6 +2,8 @@
 package blueprint
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -24,6 +26,7 @@ const (
 )
 
 var validServiceName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+var validIdentity = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$`)
 
 // Blueprint describes reusable Kubernetes resources and exposed services that
 // a team makes available for authenticated identities to instantiate.
@@ -84,6 +87,17 @@ type WorkloadReference struct {
 	APIVersion string `json:"apiVersion"`
 	Kind       string `json:"kind"`
 	Name       string `json:"name"`
+}
+
+// Instance is a blueprint rendered for one authenticated identity.
+type Instance struct {
+	Identity      string
+	IdentitySlug  string
+	BlueprintName string
+	Namespace     string
+	Labels        map[string]string
+	Resources     []Resource
+	Services      []Service
 }
 
 // Default returns a complete starter blueprint with one scale-to-zero web service.
@@ -149,6 +163,130 @@ func Default(name string) Blueprint {
 			},
 		},
 	}
+}
+
+// Instantiate renders an isolated namespace and resource copy for identity.
+func (document Blueprint) Instantiate(identity string) (Instance, error) {
+	if err := document.Validate(); err != nil {
+		return Instance{}, err
+	}
+	identitySlug, err := slugIdentity(identity)
+	if err != nil {
+		return Instance{}, err
+	}
+	replacements := map[string]string{
+		IdentitySlugTemplate:  identitySlug,
+		BlueprintNameTemplate: document.Metadata.Name,
+	}
+	namespace := replaceTemplateValues(document.Spec.Namespace.NameTemplate, replacements)
+	namespace = shortenDNSLabel(namespace, namespace)
+	if problems := validation.IsDNS1123Label(namespace); len(problems) != 0 {
+		return Instance{}, fmt.Errorf("render namespace for identity %q: %s", identity, strings.Join(problems, "; "))
+	}
+
+	labels := make(map[string]string, len(document.Spec.Namespace.Labels)+3)
+	for key, value := range document.Spec.Namespace.Labels {
+		rendered := replaceTemplateValues(value, replacements)
+		if len(rendered) > validation.LabelValueMaxLength {
+			rendered = shortenLabelValue(rendered)
+		}
+		if problems := validation.IsValidLabelValue(rendered); len(problems) != 0 {
+			return Instance{}, fmt.Errorf("render namespace label %q for identity %q: %s", key, identity, strings.Join(problems, "; "))
+		}
+		labels[key] = rendered
+	}
+	labels["app.kubernetes.io/managed-by"] = "tearenv"
+	labels["tearenv.io/identity"] = identitySlug
+	labels["tearenv.io/blueprint"] = document.Metadata.Name
+
+	resources := make([]Resource, 0, len(document.Spec.Resources))
+	for index, resource := range document.Spec.Resources {
+		copy, err := cloneResource(resource)
+		if err != nil {
+			return Instance{}, fmt.Errorf("copy spec.resources[%d]: %w", index, err)
+		}
+		metadata, _ := copy["metadata"].(map[string]any)
+		metadata["namespace"] = namespace
+		resources = append(resources, copy)
+	}
+
+	return Instance{
+		Identity:      identity,
+		IdentitySlug:  identitySlug,
+		BlueprintName: document.Metadata.Name,
+		Namespace:     namespace,
+		Labels:        labels,
+		Resources:     resources,
+		Services:      append([]Service(nil), document.Spec.Services...),
+	}, nil
+}
+
+func slugIdentity(identity string) (string, error) {
+	if !validIdentity.MatchString(identity) {
+		return "", fmt.Errorf("identity %q must match %s", identity, validIdentity.String())
+	}
+	var normalized strings.Builder
+	previousHyphen := false
+	for _, character := range strings.ToLower(identity) {
+		valid := character >= 'a' && character <= 'z' || character >= '0' && character <= '9'
+		if valid {
+			normalized.WriteRune(character)
+			previousHyphen = false
+			continue
+		}
+		if !previousHyphen && normalized.Len() != 0 {
+			normalized.WriteByte('-')
+			previousHyphen = true
+		}
+	}
+	value := strings.Trim(normalized.String(), "-")
+	if value != identity || len(value) > validation.DNS1123LabelMaxLength {
+		value = hashDNSLabel(value, identity)
+	}
+	return value, nil
+}
+
+func replaceTemplateValues(value string, replacements map[string]string) string {
+	for placeholder, replacement := range replacements {
+		value = strings.ReplaceAll(value, placeholder, replacement)
+	}
+	return value
+}
+
+func shortenDNSLabel(value, hashSource string) string {
+	if len(value) <= validation.DNS1123LabelMaxLength {
+		return value
+	}
+	return hashDNSLabel(value, hashSource)
+}
+
+func hashDNSLabel(value, hashSource string) string {
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashSource)))[:8]
+	prefixLength := validation.DNS1123LabelMaxLength - len(hash) - 1
+	if len(value) > prefixLength {
+		value = value[:prefixLength]
+	}
+	prefix := strings.Trim(value, "-")
+	return prefix + "-" + hash
+}
+
+func shortenLabelValue(value string) string {
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(value)))[:8]
+	prefixLength := validation.LabelValueMaxLength - len(hash) - 1
+	prefix := strings.Trim(value[:prefixLength], "-_.")
+	return prefix + "-" + hash
+}
+
+func cloneResource(resource Resource) (Resource, error) {
+	contents, err := json.Marshal(resource)
+	if err != nil {
+		return nil, err
+	}
+	var copy Resource
+	if err := json.Unmarshal(contents, &copy); err != nil {
+		return nil, err
+	}
+	return copy, nil
 }
 
 func workspaceLabels() map[string]any {

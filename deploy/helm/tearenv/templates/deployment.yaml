@@ -1,3 +1,6 @@
+{{- if and .Values.blueprint.enabled (not .Values.scaler.kubernetes.enabled) }}
+{{- fail "blueprint.enabled requires scaler.kubernetes.enabled" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -70,6 +73,9 @@ spec:
             {{- if .Values.publicKeys.existingSecret }}
             - --authorized-keys=/etc/tearenv/authorized-keys/{{ .Values.publicKeys.secretKey }}
             {{- end }}
+            {{- if .Values.blueprint.enabled }}
+            - --blueprint=/etc/tearenv/blueprint/{{ .Values.blueprint.configMapKey }}
+            {{- end }}
           ports:
             - name: ssh
               containerPort: 2222
@@ -101,6 +107,11 @@ spec:
               mountPath: /etc/tearenv/authorized-keys
               readOnly: true
             {{- end }}
+            {{- if .Values.blueprint.enabled }}
+            - name: blueprint
+              mountPath: /etc/tearenv/blueprint
+              readOnly: true
+            {{- end }}
       volumes:
         - name: bootstrap
           secret:
@@ -124,6 +135,14 @@ spec:
             items:
               - key: {{ .Values.publicKeys.secretKey }}
                 path: {{ .Values.publicKeys.secretKey }}
+        {{- end }}
+        {{- if .Values.blueprint.enabled }}
+        - name: blueprint
+          configMap:
+            name: {{ include "tearenv.blueprintConfigMapName" . }}
+            items:
+              - key: {{ .Values.blueprint.configMapKey }}
+                path: {{ .Values.blueprint.configMapKey }}
         {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

@@ -72,9 +72,10 @@ Choose another included overlay when needed:
 ```sh
 kubectl apply -k deploy/kustomize/overlays/load-balancer
 kubectl apply -k deploy/kustomize/overlays/cluster-wide
+kubectl apply -k deploy/kustomize/overlays/blueprint
 ```
 
-The default and load-balancer overlays can scale workloads only in `tearenv-system`. The cluster-wide overlay replaces that Role with a ClusterRole.
+The default and load-balancer overlays can scale workloads only in `tearenv-system`. The cluster-wide overlay replaces that Role with a scaler ClusterRole. The blueprint overlay mounts a starter definition and adds the broader ClusterRole needed to create identity namespaces and their resources.
 
 The Kustomize Service exposes `/metrics` on its named `metrics` port, `9090`.
 
@@ -108,7 +109,7 @@ kubectl apply -k deploy/kustomize/overlays/public-keys
 
 Write access to this Secret is identity-administration access. Restrict who can create or update it.
 
-## Prepare team blueprints separately for now
+## Create one environment namespace per identity
 
 Generate and review a reusable environment definition with:
 
@@ -118,9 +119,31 @@ tearenvd blueprint init \
   > web-development.yaml
 ```
 
-The generated namespace template separates environments by authenticated identity and selected blueprint. Resource templates omit `metadata.namespace` because the future provisioner will inject the rendered namespace.
+Review and store the file in a team-controlled configuration repository. The generated namespace template separates environments by authenticated identity and blueprint name. Resource templates omit `metadata.namespace` because `tearenvd` injects the rendered namespace.
 
-The Helm chart and Kustomize manifests don't mount, store, or apply blueprint files yet. Keep reviewed blueprint YAML in your team-controlled configuration repository until catalog storage and reconciliation are implemented. Don't apply the generated document with `kubectl`; `EnvironmentBlueprint` isn't a Kubernetes CRD.
+For Helm, create a ConfigMap from the file and enable it during installation:
+
+```sh
+kubectl create configmap tearenv-blueprint \
+  --namespace tearenv-system \
+  --from-file=environment-blueprint.yaml=web-development.yaml
+
+helm upgrade --install tearenv deploy/helm/tearenv \
+  --namespace tearenv-system \
+  --reuse-values \
+  --set blueprint.enabled=true \
+  --set blueprint.existingConfigMap=tearenv-blueprint
+```
+
+For Kustomize, replace `deploy/kustomize/overlays/blueprint/environment-blueprint.yaml` with the reviewed file, then run:
+
+```sh
+kubectl apply -k deploy/kustomize/overlays/blueprint
+```
+
+The invite login for an identity creates or patches its namespace and resources, as do later token or public-key logins. Login fails if reconciliation fails. Repeat logins use server-side apply against the same objects. Removing an object from the blueprint doesn't delete the existing object.
+
+Blueprint provisioning requires cluster-wide permission to create namespaces and create or patch the namespaced APIs used by the document. The supplied Helm and Kustomize rules cover common core, `apps`, `batch`, and `networking.k8s.io` resources. Review these permissions and extend them only for approved resource types. Don't apply the blueprint file directly with `kubectl`; `EnvironmentBlueprint` isn't a Kubernetes CRD.
 
 ## Operate and upgrade the gateway
 

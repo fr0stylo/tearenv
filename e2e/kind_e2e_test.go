@@ -17,21 +17,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fr0stylo/tearenv/internal/blueprint"
 	"github.com/fr0stylo/tearenv/internal/profile"
 	"github.com/fr0stylo/tearenv/internal/server"
 	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 const (
-	kindE2EEnabled       = "TEARENV_KIND_E2E"
-	kindE2EKeepCluster   = "TEARENV_KEEP_KIND_CLUSTER"
-	kindNamespace        = "tearenv-e2e"
-	kindAliceResponse    = "alice workload\n"
-	kindAliceToken       = "tearenv-kind-alice-token-long-enough"
-	kindBobResponse      = "bob workload\n"
-	kindBobToken         = "tearenv-kind-bob-token-long-enough"
-	kindCommandTimeout   = 5 * time.Minute
-	kindConditionTimeout = 90 * time.Second
+	kindE2EEnabled        = "TEARENV_KIND_E2E"
+	kindE2EKeepCluster    = "TEARENV_KEEP_KIND_CLUSTER"
+	kindNamespace         = "tearenv-e2e"
+	kindAliceResponse     = "alice workload\n"
+	kindAliceToken        = "tearenv-kind-alice-token-long-enough"
+	kindBobResponse       = "bob workload\n"
+	kindBobToken          = "tearenv-kind-bob-token-long-enough"
+	kindBlueprintResponse = "blueprint workload\n"
+	kindCommandTimeout    = 5 * time.Minute
+	kindConditionTimeout  = 90 * time.Second
 )
 
 func TestKubernetesScalingWithKind(t *testing.T) {
@@ -112,12 +114,15 @@ func TestKubernetesScalingWithKind(t *testing.T) {
 	}
 	credentialsPath := filepath.Join(temporary, "users.json")
 	writeKindCredentials(t, credentialsPath)
+	blueprintPath := filepath.Join(temporary, "blueprint.yaml")
+	writeKindBlueprint(t, blueprintPath, imageName)
 
 	mustRunCommand(t, root, nil, "kubectl", "--context", contextName, "create", "namespace", kindNamespace)
 	mustRunCommand(t, root, nil, "kubectl", "--context", contextName, "-n", kindNamespace,
 		"create", "secret", "generic", "tearenvd-config",
 		"--from-file=users.json="+credentialsPath,
 		"--from-file=host_key="+hostKeyPath,
+		"--from-file=blueprint.yaml="+blueprintPath,
 	)
 	manifestPath := filepath.Join(root, "e2e", "kind", "manifests.yaml")
 	manifest, err := os.ReadFile(manifestPath)
@@ -154,10 +159,25 @@ func TestKubernetesScalingWithKind(t *testing.T) {
 	if err := os.WriteFile(knownHostsPath, []byte(knownHost), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	aliceAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "alice", kindAliceToken)
-	bobAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "bob", kindBobToken)
+	aliceAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "alice", kindAliceToken, "http")
+	bobAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "bob", kindBobToken, "http")
 	aliceURL := "http://" + aliceAddress + "/"
 	bobURL := "http://" + bobAddress + "/"
+	aliceEnvironment := "tearenv-alice-developer-environment"
+	bobEnvironment := "tearenv-bob-developer-environment"
+	for _, namespace := range []string{aliceEnvironment, bobEnvironment} {
+		waitForDeploymentReplicasInNamespace(t, root, contextName, namespace, "workspace", "0", kindConditionTimeout)
+	}
+
+	aliceBlueprintAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "alice", kindAliceToken, "web")
+	bobBlueprintAddress := startKindClient(t, root, temporary, clientBinary, sshAddress, knownHostsPath, "bob", kindBobToken, "web")
+	assertHTTPResponse(t, "http://"+aliceBlueprintAddress+"/", kindBlueprintResponse)
+	waitForDeploymentReplicasInNamespace(t, root, contextName, aliceEnvironment, "workspace", "1", 2*time.Second)
+	waitForDeploymentReplicasInNamespace(t, root, contextName, bobEnvironment, "workspace", "0", 2*time.Second)
+	waitForDeploymentReplicasInNamespace(t, root, contextName, aliceEnvironment, "workspace", "0", kindConditionTimeout)
+	assertHTTPResponse(t, "http://"+bobBlueprintAddress+"/", kindBlueprintResponse)
+	waitForDeploymentReplicasInNamespace(t, root, contextName, bobEnvironment, "workspace", "1", 2*time.Second)
+	waitForDeploymentReplicasInNamespace(t, root, contextName, bobEnvironment, "workspace", "0", kindConditionTimeout)
 
 	// Alice's first cold request must only start Alice's identity-bound workload.
 	assertHTTPResponse(t, aliceURL, kindAliceResponse)
@@ -203,9 +223,9 @@ func requireCommands(t *testing.T, commands ...string) {
 	}
 }
 
-func startKindClient(t *testing.T, root, temporary, clientBinary, sshAddress, knownHostsPath, identity, token string) string {
+func startKindClient(t *testing.T, root, temporary, clientBinary, sshAddress, knownHostsPath, identity, token, service string) string {
 	t.Helper()
-	profilePath := filepath.Join(temporary, identity+"-profile.json")
+	profilePath := filepath.Join(temporary, identity+"-"+service+"-profile.json")
 	if err := profile.Save(profilePath, profile.Profile{
 		ServerAddress: sshAddress,
 		Identity:      identity,
@@ -215,12 +235,42 @@ func startKindClient(t *testing.T, root, temporary, clientBinary, sshAddress, kn
 		t.Fatal(err)
 	}
 	localAddress := reserveAddress(t)
-	clientProcess := startProcess(t, root, filepath.Join(temporary, identity+"-client.log"),
-		clientBinary, "connect", "--config", profilePath, "http="+localAddress,
+	clientProcess := startProcess(t, root, filepath.Join(temporary, identity+"-"+service+"-client.log"),
+		clientBinary, "connect", "--config", profilePath, service+"="+localAddress,
 	)
 	t.Cleanup(func() { clientProcess.stop(t) })
 	waitForLog(t, clientProcess.logPath, "service ready")
 	return localAddress
+}
+
+func writeKindBlueprint(t *testing.T, path, image string) {
+	t.Helper()
+	document := blueprint.Default("developer-environment")
+	deployment := document.Spec.Resources[0]
+	spec := deployment["spec"].(map[string]any)
+	template := spec["template"].(map[string]any)
+	podSpec := template["spec"].(map[string]any)
+	containers := podSpec["containers"].([]any)
+	container := containers[0].(map[string]any)
+	container["image"] = image
+	container["imagePullPolicy"] = "Never"
+	container["command"] = []any{"/usr/local/bin/http-server"}
+	container["env"] = []any{map[string]any{"name": "TEARENV_HTTP_RESPONSE", "value": "blueprint workload"}}
+	container["ports"] = []any{map[string]any{"name": "http", "containerPort": 8080}}
+	serviceSpec := document.Spec.Resources[1]["spec"].(map[string]any)
+	serviceSpec["ports"] = []any{map[string]any{"name": "http", "port": 8080, "targetPort": "http"}}
+	document.Spec.Services[0].LocalPort = 8080
+	document.Spec.Services[0].Target.Port = 8080
+	document.Spec.Services[0].Scale.ReadyTimeout = "45s"
+	document.Spec.Services[0].Scale.IdleTimeout = "4s"
+
+	contents, err := blueprint.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func buildLinuxBinary(t *testing.T, root, output, packagePath string) {
@@ -345,8 +395,13 @@ func environmentWithOverrides(overrides []string) []string {
 
 func waitForDeploymentReplicas(t *testing.T, root, contextName, deployment, replicas string, timeout time.Duration) {
 	t.Helper()
+	waitForDeploymentReplicasInNamespace(t, root, contextName, kindNamespace, deployment, replicas, timeout)
+}
+
+func waitForDeploymentReplicasInNamespace(t *testing.T, root, contextName, namespace, deployment, replicas string, timeout time.Duration) {
+	t.Helper()
 	waitForKubernetesValue(t, root, contextName, timeout,
-		[]string{"-n", kindNamespace, "get", "deployment", deployment, "-o", "jsonpath={.spec.replicas}"},
+		[]string{"-n", namespace, "get", "deployment", deployment, "-o", "jsonpath={.spec.replicas}"},
 		replicas,
 	)
 }

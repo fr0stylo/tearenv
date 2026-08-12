@@ -112,4 +112,4 @@ Press `Ctrl+C` in the `tearenv connect`, `tearenvd`, and Python terminals when y
 
 For a real environment, keep the gateway host key stable, store the credential file on protected writable storage, publish the SSH listener, and give each developer an independently generated invite. Use [the operator guide](operator-guide.md) for static and Kubernetes-backed grants, then send developers [the developer guide](developer-guide.md).
 
-Teams planning reusable namespace-per-identity environments can also prepare [environment blueprints](environment-blueprints.md). Blueprint initialization is available, but this walkthrough continues to use direct grants because catalog selection and Kubernetes provisioning aren't implemented yet.
+Teams can use [environment blueprints](environment-blueprints.md) to reconcile one Kubernetes namespace per authenticated identity. This local walkthrough continues to use direct grants because blueprint provisioning requires `tearenvd` to run in a Kubernetes pod with the required service-account permissions.
