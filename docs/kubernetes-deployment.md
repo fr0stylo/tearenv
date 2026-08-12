@@ -4,14 +4,16 @@
 
 Use either Helm or Kustomize to run one `tearenvd` gateway with persistent policy and SSH host-key storage. Both setups use a namespaced scaler Role by default and run the containers without root privileges.
 
-## Publish the gateway image
+## Publish the gateway image from a version tag
 
-Build and push the included production image:
+Push a semantic version tag to let the release workflow build the `linux/amd64` and `linux/arm64` image and publish it to GitHub Container Registry:
 
 ```sh
-docker build -t registry.example.com/tearenv:0.1.0 .
-docker push registry.example.com/tearenv:0.1.0
+git tag v0.1.0
+git push origin v0.1.0
 ```
+
+The workflow publishes `ghcr.io/<owner>/<repository>:0.1.0` and the matching major, minor, exact Git tag, and `latest` aliases. It listens for the Git tag push, not the GitHub `release` event.
 
 The image contains `tearenvd` and runs as user `65532`.
 

@@ -19,6 +19,17 @@ make build
 
 This creates `bin/tearenv` and `bin/tearenvd`.
 
+## Publish a release image
+
+Push a semantic version tag to publish the multi-architecture image to GitHub Container Registry:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Only pushed tags matching `v<major>.<minor>.<patch>` start the release workflow. A stable tag such as `v1.2.3` publishes `v1.2.3`, `1.2.3`, `1.2`, `1`, and `latest` image tags under `ghcr.io/<owner>/<repository>`. Branch pushes and pull requests build the image in CI but never push it.
+
 ## Deploy on Kubernetes
 
 The repository includes a production Dockerfile, Helm chart, and Kustomize overlays:

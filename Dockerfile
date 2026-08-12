@@ -10,6 +10,6 @@ FROM scratch
 
 COPY --from=build /out/tearenvd /usr/local/bin/tearenvd
 USER 65532:65532
-EXPOSE 2222 9090
+EXPOSE 2222 8080 9090
 ENTRYPOINT ["/usr/local/bin/tearenvd"]
 CMD ["serve"]
