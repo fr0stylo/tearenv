@@ -114,6 +114,17 @@ func TestRootCommandProvidesGeneratedHelp(t *testing.T) {
 	}
 }
 
+func TestRootCommandLeavesErrorRenderingToMain(t *testing.T) {
+	root := newRootCommand()
+
+	if !root.SilenceErrors {
+		t.Error("SilenceErrors = false, want true")
+	}
+	if !root.SilenceUsage {
+		t.Error("SilenceUsage = false, want true")
+	}
+}
+
 func TestRootCommandWithoutSubcommandShowsHelp(t *testing.T) {
 	root := newRootCommand()
 	var output bytes.Buffer
