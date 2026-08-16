@@ -6,14 +6,9 @@ kustomize_output="$(mktemp)"
 oidc_chart_output="$(mktemp)"
 oidc_kustomize_output="$(mktemp)"
 dex_chart_output="$(mktemp)"
-helm_repository_config="$(mktemp)"
-helm_repository_cache="$(mktemp -d)"
-trap 'rm -f "$chart_output" "$kustomize_output" "$oidc_chart_output" "$oidc_kustomize_output" "$dex_chart_output" "$helm_repository_config"; rm -rf "$helm_repository_cache"' EXIT
+trap 'rm -f "$chart_output" "$kustomize_output" "$oidc_chart_output" "$oidc_kustomize_output" "$dex_chart_output"' EXIT
 
-export HELM_REPOSITORY_CONFIG="$helm_repository_config"
-export HELM_REPOSITORY_CACHE="$helm_repository_cache"
-helm repo add dex https://charts.dexidp.io
-helm dependency build deploy/helm/tearenv
+sh hack/prepare-helm-dependencies.sh
 helm lint deploy/helm/tearenv
 helm template tearenv deploy/helm/tearenv --namespace tearenv-system >"$chart_output"
 helm template tearenv deploy/helm/tearenv \
