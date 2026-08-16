@@ -84,6 +84,7 @@ Verify the gateway's SSH host key, then submit a public-key registration:
 ```sh
 tearenv login \
   --api-url https://tearenv-api.example.com \
+  --registration-token-file ./tearenv-registration-token \
   --identity alice \
   --server gateway.example.com:2222
 ```

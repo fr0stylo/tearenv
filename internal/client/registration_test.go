@@ -50,6 +50,25 @@ func TestSubmitUserRegistrationUsesResourceAPIPath(t *testing.T) {
 	}
 }
 
+func TestSubmitUserRegistrationSendsBearerToken(t *testing.T) {
+	t.Parallel()
+
+	want := testUserRegistration(t)
+	token := string(bytes.Repeat([]byte{'x'}, 32))
+	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if got := request.Header.Get("Authorization"); got != "Bearer "+token {
+			t.Errorf("Authorization = %q, want bearer token", got)
+		}
+		want.Status = acceptedStatus()
+		return registrationHTTPResponse(t, http.StatusCreated, want), nil
+	})}
+
+	if _, err := SubmitUserRegistration(t.Context(), httpClient, "https://api.example.com", want,
+		WithRegistrationToken(token)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSubmitUserRegistrationRequiresAcceptance(t *testing.T) {
 	t.Parallel()
 

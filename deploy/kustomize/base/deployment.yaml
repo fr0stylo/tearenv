@@ -9,6 +9,7 @@ spec:
   template:
     spec:
       serviceAccountName: tearenvd
+      terminationGracePeriodSeconds: 45
       securityContext:
         fsGroup: 65532
         fsGroupChangePolicy: OnRootMismatch
@@ -50,6 +51,10 @@ spec:
             - --metrics-listen=:9090
             - --users=/var/lib/tearenv/users.json
             - --host-key=/var/lib/tearenv/ssh_host_ed25519_key
+            - --api-listen=:8080
+            - --registrations=/var/lib/tearenv/registrations
+            - --registration-namespace=default
+            - --registration-token-file=/etc/tearenv/registration-auth/token
             - --scaler=kubernetes
           ports:
             - name: ssh
@@ -58,16 +63,26 @@ spec:
             - name: metrics
               containerPort: 9090
               protocol: TCP
-          livenessProbe:
+            - name: registration
+              containerPort: 8080
+              protocol: TCP
+          startupProbe:
             tcpSocket:
               port: ssh
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: 2
+            failureThreshold: 30
           readinessProbe:
-            tcpSocket:
-              port: ssh
-            initialDelaySeconds: 2
+            httpGet:
+              path: /readyz
+              port: registration
             periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: registration
+            periodSeconds: 10
+            failureThreshold: 3
           resources:
             requests:
               cpu: 25m
@@ -85,6 +100,9 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /var/lib/tearenv
+            - name: registration-auth
+              mountPath: /etc/tearenv/registration-auth
+              readOnly: true
       volumes:
         - name: bootstrap
           secret:
@@ -96,3 +114,10 @@ spec:
         - name: state
           persistentVolumeClaim:
             claimName: tearenvd-state
+        - name: registration-auth
+          secret:
+            secretName: tearenvd-registration
+            defaultMode: 0440
+            items:
+              - key: token
+                path: token

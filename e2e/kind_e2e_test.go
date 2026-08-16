@@ -46,13 +46,14 @@ func TestKubernetesScalingWithKind(t *testing.T) {
 	}
 
 	root := repositoryRoot(t)
-	requireCommands(t, "docker", "kind", "kubectl", "go")
+	requireCommands(t, "docker", "helm", "kind", "kubectl", "go")
 	mustRunCommand(t, root, nil, "docker", "info")
 
 	temporary := t.TempDir()
 	clusterName := "tearenv-e2e-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	contextName := "kind-" + clusterName
 	imageName := "tearenv-kind-e2e:" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	gatewayImage := "tearenv-kind-gateway:" + strconv.FormatInt(time.Now().UnixNano(), 36)
 
 	t.Cleanup(func() {
 		if os.Getenv(kindE2EKeepCluster) == "1" {
@@ -100,13 +101,18 @@ func TestKubernetesScalingWithKind(t *testing.T) {
 		"-t", imageName,
 		imageContext,
 	)
+	mustRunCommand(t, root, nil, "docker", "build", "-t", gatewayImage, root)
 	t.Cleanup(func() {
-		output, err := runCommandWithTimeout(root, nil, 30*time.Second, "docker", "image", "rm", imageName)
-		if err != nil {
-			t.Logf("remove test image %q: %v\n%s", imageName, err, output)
+		for _, image := range []string{imageName, gatewayImage} {
+			output, err := runCommandWithTimeout(root, nil, 30*time.Second, "docker", "image", "rm", image)
+			if err != nil {
+				t.Logf("remove test image %q: %v\n%s", image, err, output)
+			}
 		}
 	})
 	mustRunCommand(t, root, nil, "kind", "load", "docker-image", imageName, "--name", clusterName)
+	mustRunCommand(t, root, nil, "kind", "load", "docker-image", gatewayImage, "--name", clusterName)
+	testHelmInstallation(t, root, temporary, contextName, gatewayImage, clientBinary)
 
 	hostKeyPath := filepath.Join(temporary, "host_key")
 	signer, err := server.LoadOrCreateHostKey(hostKeyPath)
@@ -216,6 +222,102 @@ func TestKubernetesScalingWithKind(t *testing.T) {
 	} {
 		waitForDeploymentReplicas(t, root, contextName, workload.deployment, "0", kindConditionTimeout)
 		waitForNoWorkloadPods(t, root, contextName, workload.selector, kindConditionTimeout)
+	}
+}
+
+func testHelmInstallation(t *testing.T, root, temporary, contextName, image, clientBinary string) {
+	t.Helper()
+
+	const namespace = "tearenv-chart-smoke"
+	const release = "chart-smoke"
+	tokenBytes := make([]byte, 32)
+	for index := range tokenBytes {
+		tokenBytes[index] = byte('a' + index%26)
+	}
+	token := string(tokenBytes)
+
+	credentialsPath := filepath.Join(temporary, "chart-users.json")
+	writeKindCredentials(t, credentialsPath)
+	tokenPath := filepath.Join(temporary, "chart-registration-token")
+	if err := os.WriteFile(tokenPath, []byte(token), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mustRunCommand(t, root, nil, "kubectl", "--context", contextName, "create", "namespace", namespace)
+	mustRunCommand(t, root, nil, "kubectl", "--context", contextName, "-n", namespace,
+		"create", "secret", "generic", "tearenv-bootstrap", "--from-file=users.json="+credentialsPath)
+	mustRunCommand(t, root, nil, "kubectl", "--context", contextName, "-n", namespace,
+		"create", "secret", "generic", "tearenv-registration", "--from-file=token="+tokenPath)
+
+	imageRepository, imageTag, found := strings.Cut(image, ":")
+	if !found {
+		t.Fatalf("test image %q has no tag", image)
+	}
+	mustRunCommand(t, root, nil, "helm", "upgrade", "--install", release,
+		filepath.Join(root, "deploy", "helm", "tearenv"),
+		"--kube-context", contextName,
+		"--namespace", namespace,
+		"--set-string", "image.repository="+imageRepository,
+		"--set-string", "image.tag="+imageTag,
+		"--set", "image.pullPolicy=Never",
+		"--set", "bootstrap.existingSecret=tearenv-bootstrap",
+		"--set", "registration.token.existingSecret=tearenv-registration",
+		"--set", "scaler.kubernetes.enabled=false",
+		"--wait", "--timeout", "90s",
+	)
+
+	apiAddress := reserveAddress(t)
+	_, apiPort, err := net.SplitHostPort(apiAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forward := startProcess(t, root, filepath.Join(temporary, "chart-port-forward.log"),
+		"kubectl", "--context", contextName, "-n", namespace,
+		"port-forward", "--address=127.0.0.1", "service/chart-smoke-tearenv-registration", apiPort+":8080",
+	)
+	waitForLog(t, forward.logPath, "Forwarding from "+apiAddress)
+
+	chartState := filepath.Join(temporary, "chart-client")
+	if err := os.Mkdir(chartState, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	mustRunCommand(t, root, nil, clientBinary, "login",
+		"--api-url", "http://"+apiAddress,
+		"--registration-token-file", tokenPath,
+		"--identity", "chart-smoke",
+		"--server", "127.0.0.1:2222",
+		"--private-key", filepath.Join(chartState, "id_ed25519"),
+		"--registration", filepath.Join(chartState, "registration.yaml"),
+		"--config", filepath.Join(chartState, "config.json"),
+		"--known-hosts", filepath.Join(chartState, "known_hosts"),
+	)
+	forward.stop(t)
+
+	mustRunCommand(t, root, nil, "kubectl", "--context", contextName, "-n", namespace,
+		"rollout", "restart", "deployment/chart-smoke-tearenv")
+	mustRunCommand(t, root, nil, "kubectl", "--context", contextName, "-n", namespace,
+		"rollout", "status", "deployment/chart-smoke-tearenv", "--timeout=90s")
+
+	forward = startProcess(t, root, filepath.Join(temporary, "chart-port-forward-after-restart.log"),
+		"kubectl", "--context", contextName, "-n", namespace,
+		"port-forward", "--address=127.0.0.1", "service/chart-smoke-tearenv-registration", apiPort+":8080",
+	)
+	t.Cleanup(func() { forward.stop(t) })
+	waitForLog(t, forward.logPath, "Forwarding from "+apiAddress)
+
+	endpoint := "http://" + apiAddress + "/apis/tearenv.io/v1alpha1/namespaces/default/userregistrations/chart-smoke"
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, endpoint, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		t.Fatalf("GET persisted registration status = %s, body = %q", response.Status, body)
 	}
 }
 

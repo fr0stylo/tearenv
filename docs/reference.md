@@ -23,6 +23,7 @@ Creates or reuses an Ed25519 key, submits a `UserRegistration` to the resource A
 | `--namespace`                    | `default`                                                   | Namespace containing the registration resource.           |
 | `--server`                       | `127.0.0.1:2222`                                            | SSH gateway address saved in the profile.                  |
 | `--identity`                     | Prompt with the local hostname                              | tearenv identity; supplying it skips the prompt.           |
+| `--registration-token-file`      | None                                                        | File containing the registration API bearer token.         |
 | `--private-key`                  | OS config directory plus `tearenv/id_ed25519`               | Ed25519 private key created or reused locally.             |
 | `--registration`                 | OS config directory plus `tearenv/user-registration.yaml`   | Local copy of the submitted and observed resource.         |
 | `--config`                       | OS config directory plus `tearenv/config.json`              | Profile written after API acceptance.                      |
@@ -96,6 +97,7 @@ Durations use Go syntax such as `500ms`, `30s`, `2m`, or `1h30m`. Negative timeo
 | `--users`                  | `.data/users.json`           | Identity-bound service policy file.                                      |
 | `--registrations`          | `.data/registrations`        | Durable `UserRegistration` directory.                                    |
 | `--registration-namespace` | `default`                    | Registration namespace used for SSH authentication.                      |
+| `--registration-token-file`| None                         | File containing the registration API bearer token; empty disables API authentication. |
 | `--blueprint`              | None                         | Team blueprint reconciled for every successfully authenticated identity. |
 | `--scaler`                 | None                         | Scaler backend. The included value is `kubernetes`.                      |
 | `--kubernetes`             | `false`                      | Deprecated alias for `--scaler kubernetes`.                              |

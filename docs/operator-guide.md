@@ -62,6 +62,7 @@ Run:
 ./bin/tearenvd serve \
   --listen :2222 \
   --api-listen :8080 \
+  --registration-token-file /run/secrets/tearenv/registration-token \
   --metrics-listen :9090 \
   --users /var/lib/tearenv/users.json \
   --registrations /var/lib/tearenv/registrations \
@@ -72,7 +73,7 @@ If the host key doesn't exist, `tearenvd` creates a persistent Ed25519 private k
 
 The startup log reports the bound SSH, API, and metrics addresses, state paths, scaler name, and public-key fingerprint. Publish the fingerprint through a trusted channel so developers can verify it before login.
 
-The API automatically accepts the first valid resource at a path and stores it as protected YAML. Repeating the same registration is idempotent; changing its spec returns `409 Conflict`. Follow [the authentication guide](authentication.md) for the client command and trust boundary.
+The API requires the configured bearer token, automatically accepts the first valid resource at a path, and stores it as protected YAML. Repeating the same registration is idempotent; changing its spec returns `409 Conflict`. The unauthenticated `/healthz` and `/readyz` paths are available for probes. Follow [the authentication guide](authentication.md) for the client command and trust boundary.
 
 The process handles `SIGINT` and `SIGTERM`. On shutdown it closes the SSH listener and attempts to scale down workloads started by that process, allowing up to 30 seconds for each scaler call.
 

@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: tearenvd
+  name: tearenvd-metrics
 spec:
   type: ClusterIP
   ports:
-    - name: ssh
-      port: 2222
-      targetPort: ssh
+    - name: metrics
+      port: 9090
+      targetPort: metrics
       protocol: TCP

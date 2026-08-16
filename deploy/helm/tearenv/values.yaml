@@ -3,7 +3,8 @@ replicaCount: 1
 image:
   repository: ghcr.io/fr0stylo/tearenv
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # Defaults to the chart appVersion. Pin this to a digest or immutable release tag in production.
+  tag: ""
 
 imagePullSecrets: []
 nameOverride: ""
@@ -18,6 +19,23 @@ service:
   type: ClusterIP
   port: 2222
   annotations: {}
+
+registration:
+  namespace: default
+  port: 8080
+  token:
+    # Leave empty for Helm to generate and preserve a token. Set this for GitOps.
+    existingSecret: ""
+    secretKey: token
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: ""
+    path: /
+    tls:
+      enabled: true
+      secretName: ""
 
 metrics:
   enabled: true
@@ -35,11 +53,6 @@ bootstrap:
         }
       }
     }
-
-publicKeys:
-  # Set this to a Secret containing a nonempty authorized_keys.json document.
-  existingSecret: ""
-  secretKey: authorized_keys.json
 
 blueprint:
   enabled: false
@@ -91,7 +104,13 @@ securityContext:
   runAsNonRoot: true
   runAsUser: 65532
 
-resources: {}
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+terminationGracePeriodSeconds: 45
 nodeSelector: {}
 tolerations: []
 affinity: {}

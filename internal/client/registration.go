@@ -18,6 +18,20 @@ import (
 
 const registrationResponseLimit = 1 << 20
 
+type registrationRequestOptions struct {
+	bearerToken string
+}
+
+// RegistrationRequestOption configures a registration API request.
+type RegistrationRequestOption func(*registrationRequestOptions)
+
+// WithRegistrationToken authenticates the request with a bearer enrollment token.
+func WithRegistrationToken(token string) RegistrationRequestOption {
+	return func(options *registrationRequestOptions) {
+		options.bearerToken = strings.TrimSpace(token)
+	}
+}
+
 // SubmitUserRegistration stores a registration through the tearenv resource
 // API and returns the server-owned representation.
 func SubmitUserRegistration(
@@ -25,6 +39,7 @@ func SubmitUserRegistration(
 	httpClient *http.Client,
 	baseURL string,
 	registration v1alpha1.UserRegistration,
+	requestOptions ...RegistrationRequestOption,
 ) (v1alpha1.UserRegistration, error) {
 	if httpClient == nil {
 		return v1alpha1.UserRegistration{}, errors.New("HTTP client is required")
@@ -49,6 +64,13 @@ func SubmitUserRegistration(
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Content-Type", "application/json")
+	options := registrationRequestOptions{}
+	for _, configure := range requestOptions {
+		configure(&options)
+	}
+	if options.bearerToken != "" {
+		request.Header.Set("Authorization", "Bearer "+options.bearerToken)
+	}
 	response, err := httpClient.Do(request)
 	if err != nil {
 		return v1alpha1.UserRegistration{}, fmt.Errorf("submit user registration: %w", err)

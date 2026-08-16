@@ -1,0 +1,37 @@
+{{- if .Values.registration.ingress.enabled }}
+{{- if not .Values.registration.ingress.host }}
+{{- fail "registration.ingress.host is required when registration.ingress.enabled is true" }}
+{{- end }}
+{{- if not .Values.registration.ingress.tls.enabled }}
+{{- fail "registration Ingress requires TLS; keep registration.ingress.tls.enabled=true" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "tearenv.fullname" . }}-registration
+  labels:
+    {{- include "tearenv.labels" . | nindent 4 }}
+  {{- with .Values.registration.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.registration.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  tls:
+    - hosts:
+        - {{ .Values.registration.ingress.host | quote }}
+      secretName: {{ required "registration.ingress.tls.secretName is required when TLS is enabled" .Values.registration.ingress.tls.secretName }}
+  rules:
+    - host: {{ .Values.registration.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.registration.ingress.path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "tearenv.fullname" . }}-registration
+                port:
+                  name: http
+{{- end }}

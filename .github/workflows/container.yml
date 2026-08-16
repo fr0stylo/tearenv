@@ -86,3 +86,75 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+  binaries:
+    name: Publish binaries
+    needs: [publish, helm-chart]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build release archives
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          version="${RELEASE_TAG#v}"
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+            target_os="${target%/*}"
+            target_arch="${target#*/}"
+            package_dir="dist/tearenv_${version}_${target_os}_${target_arch}"
+            mkdir -p "$package_dir"
+            CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -o "$package_dir/tearenv" ./cmd/tearenv
+            CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" go build -trimpath -o "$package_dir/tearenvd" ./cmd/tearenvd
+            tar -C dist -czf "$package_dir.tar.gz" "$(basename "$package_dir")"
+            rm -rf "$package_dir"
+          done
+          sha256sum dist/*.tar.gz >dist/checksums.txt
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/* --generate-notes --verify-tag
+
+  helm-chart:
+    name: Publish Helm chart
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.2.0
+
+      - name: Package and push chart
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          owner="${REPOSITORY_OWNER,,}"
+          printf '%s' "$GITHUB_TOKEN" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+          helm package deploy/helm/tearenv --destination dist --version "$version" --app-version "$version"
+          helm push "dist/tearenv-$version.tgz" "oci://ghcr.io/$owner/charts"

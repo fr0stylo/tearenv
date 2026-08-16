@@ -7,6 +7,7 @@ Run:
 ```sh
 tearenv login \
   --api-url https://tearenv-api.example.com \
+  --registration-token-file ./tearenv-registration-token \
   --namespace default \
   --server gateway.example.com:2222
 ```
@@ -37,17 +38,19 @@ For example:
 PUT /apis/tearenv.io/v1alpha1/namespaces/default/userregistrations/alice
 ```
 
-The API owns the durable resource. The built-in tearenvd API accepts valid registrations immediately and returns the stored `UserRegistration` with `Accepted=True`. Login then writes `config.json`.
+The API owns the durable resource. The built-in tearenvd API accepts valid registrations immediately and returns the stored `UserRegistration` with `Accepted=True`. Login then writes `config.json`. The enrollment token is sent as an HTTP bearer credential and isn't saved in that profile.
 
 The first request creates the resource. Repeating the same request returns it unchanged, including its server-owned UID and resource version. A request that changes the spec at the same path returns `409 Conflict`; key replacement is deliberately not part of this first version.
 
-`tearenvd serve` listens on `127.0.0.1:8080` by default and stores registrations under `.data/registrations`. Use `--api-listen :8080` when the endpoint must be reachable outside the gateway host, and put TLS or a trusted reverse proxy in front of it.
+`tearenvd serve` listens on `127.0.0.1:8080` by default and stores registrations under `.data/registrations`. Set `--registration-token-file` whenever the API is reachable by another machine. Use `--api-listen :8080` with TLS termination at a trusted reverse proxy; the built-in listener serves HTTP.
+
+Pass the operator-provided token to `tearenv login` with `--registration-token-file`. `TEARENV_REGISTRATION_TOKEN` is available for automation, but a protected file avoids putting a secret into shell history.
 
 ## Authorize identity claims at the API boundary
 
 Possessing a newly generated private key proves control of that key during SSH authentication. It doesn't prove that the person is entitled to the identity in `spec.identity`.
 
-The current self-service policy accepts people by default. The first writer can therefore claim an identity that has service grants. Bind the API to a trusted network, or add caller authentication before exposing it to users who shouldn't be able to claim arbitrary identities.
+The current self-service policy accepts people by default. The first writer can therefore claim an identity that has service grants. The enrollment token restricts who can submit registrations, but it doesn't bind a token holder to a specific identity. Keep it in a trusted onboarding channel and rotate it after disclosure.
 
 ## Keep the private key local
 

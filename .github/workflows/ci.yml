@@ -131,5 +131,9 @@ jobs:
         uses: azure/setup-kubectl@v5
         with:
           version: v1.36.2
+      - name: Install Helm
+        uses: azure/setup-helm@v5
+        with:
+          version: v4.2.0
       - name: Run Kubernetes E2E
         run: make e2e-kind

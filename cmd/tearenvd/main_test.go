@@ -4,12 +4,26 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/fr0stylo/tearenv/internal/blueprint"
 	"github.com/spf13/cobra"
 )
+
+func TestLoadOptionalSecretRejectsWeakToken(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, bytes.Repeat([]byte{'x'}, 8), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadOptionalSecret(path); err == nil || !strings.Contains(err.Error(), "at least 32") {
+		t.Fatalf("loadOptionalSecret() error = %v, want minimum length", err)
+	}
+}
 
 func TestRootCommandExposesGatewayWorkflow(t *testing.T) {
 	root := newRootCommand()
@@ -20,7 +34,7 @@ func TestRootCommandExposesGatewayWorkflow(t *testing.T) {
 	}{
 		{path: []string{"serve"}, flags: []string{
 			"listen", "api-listen", "metrics-listen", "host-key", "users", "registrations",
-			"registration-namespace", "blueprint", "scaler", "kubernetes",
+			"registration-namespace", "registration-token-file", "blueprint", "scaler", "kubernetes",
 		}},
 		{path: []string{"service", "grant"}, flags: []string{
 			"users", "identity", "name", "target", "local-port", "workload-kind",

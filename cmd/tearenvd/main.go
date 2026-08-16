@@ -87,6 +87,10 @@ func serve(ctx context.Context, options serveOptions) error {
 	if err != nil {
 		return err
 	}
+	registrationToken, err := loadOptionalSecret(options.registrationTokenPath)
+	if err != nil {
+		return err
+	}
 	signer, err := server.LoadOrCreateHostKey(options.hostKeyPath)
 	if err != nil {
 		return err
@@ -152,8 +156,10 @@ func serve(ctx context.Context, options serveOptions) error {
 			return fmt.Errorf("listen for registration API on %s: %w", options.apiAddress, err)
 		}
 		apiServer = &http.Server{
-			Handler:           registration.NewHandler(registrationStore),
+			Handler:           registration.NewHandler(registrationStore, registrationToken),
 			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      15 * time.Second,
 			IdleTimeout:       30 * time.Second,
 		}
 	}
@@ -174,6 +180,8 @@ func serve(ctx context.Context, options serveOptions) error {
 		metricsServer = &http.Server{
 			Handler:           metricsHandler,
 			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      15 * time.Second,
 			IdleTimeout:       30 * time.Second,
 		}
 	}
@@ -199,6 +207,24 @@ func serve(ctx context.Context, options serveOptions) error {
 		"host_key_fingerprint", ssh.FingerprintSHA256(signer.PublicKey()),
 	)
 	return serveListeners(ctx, tunnelServer, listener, apiServer, apiListener, metricsServer, metricsListener)
+}
+
+func loadOptionalSecret(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", nil
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read secret file %q: %w", path, err)
+	}
+	secret := strings.TrimSpace(string(contents))
+	if secret == "" {
+		return "", fmt.Errorf("secret file %q is empty", path)
+	}
+	if len(secret) < 32 {
+		return "", fmt.Errorf("secret file %q must contain at least 32 characters", path)
+	}
+	return secret, nil
 }
 
 func newMetricsEndpoint() (*server.Metrics, http.Handler, error) {

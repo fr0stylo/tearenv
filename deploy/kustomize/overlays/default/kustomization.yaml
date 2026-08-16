@@ -14,4 +14,4 @@ secretGenerator:
 
 images:
   - name: ghcr.io/fr0stylo/tearenv
-    newTag: latest
+    newTag: 0.2.0

@@ -42,3 +42,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "tearenv.blueprintConfigMapName" -}}
 {{- default (printf "%s-blueprint" (include "tearenv.fullname" .)) .Values.blueprint.existingConfigMap }}
 {{- end }}
+
+{{- define "tearenv.registrationSecretName" -}}
+{{- default (printf "%s-registration" (include "tearenv.fullname" .)) .Values.registration.token.existingSecret }}
+{{- end }}

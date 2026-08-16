@@ -37,6 +37,10 @@ func login(ctx context.Context, options loginOptions, input io.Reader, output, p
 	if err != nil {
 		return err
 	}
+	registrationToken, err := loadRegistrationToken(options.registrationTokenPath)
+	if err != nil {
+		return err
+	}
 	signer, err := client.LoadOrCreatePrivateKey(options.privateKeyPath, identity)
 	if err != nil {
 		return err
@@ -62,7 +66,8 @@ func login(ctx context.Context, options loginOptions, input io.Reader, output, p
 	if err := saveProtectedFile(options.registrationPath, contents); err != nil {
 		return fmt.Errorf("save user registration: %w", err)
 	}
-	accepted, err := client.SubmitUserRegistration(ctx, options.httpClient, options.apiURL, registration)
+	accepted, err := client.SubmitUserRegistration(ctx, options.httpClient, options.apiURL, registration,
+		client.WithRegistrationToken(registrationToken))
 	if err != nil {
 		if accepted.APIVersion != "" {
 			if acceptedContents, marshalErr := v1alpha1.MarshalUserRegistration(accepted); marshalErr == nil {
@@ -91,6 +96,28 @@ func login(ctx context.Context, options loginOptions, input io.Reader, output, p
 	slog.Info("login prepared", "identity", identity, "config", options.profilePath, "registration", options.registrationPath)
 	_, err = fmt.Fprintln(output, options.registrationPath)
 	return err
+}
+
+func loadRegistrationToken(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return strings.TrimSpace(os.Getenv("TEARENV_REGISTRATION_TOKEN")), nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("stat registration token file %q: %w", path, err)
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("registration token file %q permissions are %o; want 600 or stricter", path, info.Mode().Perm())
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read registration token file %q: %w", path, err)
+	}
+	token := strings.TrimSpace(string(contents))
+	if token == "" {
+		return "", fmt.Errorf("registration token file %q is empty", path)
+	}
+	return token, nil
 }
 
 func loginIdentity(value, fallback string, input io.Reader, prompts io.Writer) (string, error) {

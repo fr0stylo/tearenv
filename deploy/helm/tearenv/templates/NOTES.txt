@@ -3,12 +3,27 @@ tearenvd is installed as {{ include "tearenv.fullname" . }} in {{ .Release.Names
 Wait for the gateway:
   kubectl rollout status deployment/{{ include "tearenv.fullname" . }} -n {{ .Release.Namespace }}
 
+Save the registration token to an owner-only local file:
+  umask 077
+  kubectl get secret/{{ include "tearenv.registrationSecretName" . }} -n {{ .Release.Namespace }} -o jsonpath='{.data.{{ .Values.registration.token.secretKey }}}' | base64 --decode > tearenv-registration-token
+
 {{- if eq .Values.service.type "ClusterIP" }}
 For a local test, forward the SSH port:
   kubectl port-forward service/{{ include "tearenv.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }} -n {{ .Release.Namespace }}
 {{- else }}
 Find the published endpoint:
   kubectl get service/{{ include "tearenv.fullname" . }} -n {{ .Release.Namespace }}
+{{- end }}
+
+{{- if .Values.registration.ingress.enabled }}
+Register through the TLS endpoint:
+  tearenv login --api-url https://{{ .Values.registration.ingress.host }} --registration-token-file ./tearenv-registration-token --server HOST:{{ .Values.service.port }}
+{{- else }}
+Forward the protected registration API when onboarding a developer:
+  kubectl port-forward service/{{ include "tearenv.fullname" . }}-registration {{ .Values.registration.port }}:{{ .Values.registration.port }} -n {{ .Release.Namespace }}
+
+Then run:
+  tearenv login --api-url http://127.0.0.1:{{ .Values.registration.port }} --registration-token-file ./tearenv-registration-token --server HOST:{{ .Values.service.port }}
 {{- end }}
 
 The default bootstrap policy grants no services. Add identities and grants before onboarding users.

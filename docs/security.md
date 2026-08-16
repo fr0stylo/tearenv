@@ -32,7 +32,9 @@ Plan host-key rotation like any SSH infrastructure change: publish the new finge
 
 The current API accepts valid registrations by default. The first writer at a resource path establishes its immutable identity and public-key spec. This is simple and stateful, but it is not identity verification: an untrusted caller could register a key for an identity before its intended owner.
 
-The default API listener is loopback-only. When remote registration is required, expose it only to a trusted network and terminate TLS at the daemon or a reverse proxy. Add caller authentication before treating an untrusted network as self-service identity enrollment.
+The default API listener is loopback-only. The Kubernetes packages configure bearer-token authentication with `--registration-token-file`. When remote registration is required, expose it only through a trusted TLS reverse proxy or Ingress and protect the token through your secret-management system.
+
+The shared enrollment token proves permission to register, but it doesn't bind a caller to a particular identity. A token holder could claim any unclaimed identity, including one with existing grants. Use a private onboarding channel, rotate a disclosed token, and don't treat this baseline as untrusted multi-tenant identity federation.
 
 The private key stays in the developer's owner-only local file. Anyone who obtains it can authenticate as that identity. The server-side registration documents contain public keys, but write access is security-sensitive because it controls authentication. Keep the store on protected persistent storage and out of source control.
 

@@ -1,3 +1,5 @@
+# Legacy file retained for historical source context.
+# This patch is intentionally not referenced; use UserRegistration resources.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

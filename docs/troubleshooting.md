@@ -8,6 +8,8 @@ Start on the side that reports the failure. Client startup failures usually conc
 
 Confirm `--api-url` reaches the address configured by `tearenvd --api-listen`. A connection refusal usually means the API is disabled, bound only to loopback on another host, or blocked by a firewall.
 
+A `401 Unauthorized` response means the gateway requires an enrollment token. Pass the operator-provided file with `--registration-token-file`, or set `TEARENV_REGISTRATION_TOKEN`. Confirm that the Secret key matches `registration.token.secretKey` and restart the pod after rotating the Secret so the daemon reloads it.
+
 A `409 Conflict` means a resource already exists at the same namespace and name with a different identity or key. Reuse the original private key, choose another identity/resource name, or have an operator deliberately remove the stored registration while the gateway is stopped.
 
 ### Host key verification fails

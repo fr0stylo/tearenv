@@ -7,6 +7,8 @@ resources:
   - role.yaml
   - rolebinding.yaml
   - service.yaml
+  - registration-service.yaml
+  - metrics-service.yaml
   - serviceaccount.yaml
 
 labels:

@@ -11,17 +11,18 @@ import (
 const defaultAPIURL = "http://127.0.0.1:8080"
 
 type loginOptions struct {
-	serverAddress    string
-	apiURL           string
-	namespace        string
-	identity         string
-	identityDefault  string
-	privateKeyPath   string
-	registrationPath string
-	profilePath      string
-	knownHostsPath   string
-	insecure         bool
-	httpClient       *http.Client
+	serverAddress         string
+	apiURL                string
+	namespace             string
+	identity              string
+	identityDefault       string
+	privateKeyPath        string
+	registrationPath      string
+	registrationTokenPath string
+	profilePath           string
+	knownHostsPath        string
+	insecure              bool
+	httpClient            *http.Client
 }
 
 type connectOptions struct {
@@ -84,6 +85,7 @@ func newLoginCommand() *cobra.Command {
 	flags.StringVar(&options.namespace, "namespace", options.namespace, "registration API namespace")
 	flags.StringVar(&options.serverAddress, "server", options.serverAddress, "SSH tunnel server")
 	flags.StringVar(&options.identity, "identity", "", "tearenv identity; prompts with the hostname by default")
+	flags.StringVar(&options.registrationTokenPath, "registration-token-file", "", "file containing the registration API bearer token")
 	flags.StringVar(&options.privateKeyPath, "private-key", options.privateKeyPath, "local SSH private key")
 	flags.StringVar(&options.registrationPath, "registration", options.registrationPath, "UserRegistration YAML destination")
 	flags.StringVar(&options.profilePath, "config", options.profilePath, "local profile destination")

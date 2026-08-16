@@ -3,6 +3,3 @@ kind: Kustomization
 
 resources:
   - ../default
-
-patches:
-  - path: deployment-patch.yaml

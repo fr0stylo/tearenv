@@ -43,6 +43,7 @@ type serveOptions struct {
 	usersPath             string
 	registrationsPath     string
 	registrationNamespace string
+	registrationTokenPath string
 	blueprintPath         string
 	scalerName            string
 	kubernetes            bool
@@ -158,6 +159,7 @@ func newServeCommand() *cobra.Command {
 	flags.StringVar(&options.usersPath, "users", options.usersPath, "identity-bound service policy JSON file")
 	flags.StringVar(&options.registrationsPath, "registrations", options.registrationsPath, "durable UserRegistration store directory")
 	flags.StringVar(&options.registrationNamespace, "registration-namespace", options.registrationNamespace, "namespace used for SSH authentication")
+	flags.StringVar(&options.registrationTokenPath, "registration-token-file", "", "file containing the registration API bearer token; empty disables API authentication")
 	flags.StringVar(&options.blueprintPath, "blueprint", "", "team environment blueprint provisioned for every authenticated identity")
 	flags.StringVar(&options.scalerName, "scaler", "", "workload scaler backend (supported: kubernetes)")
 	flags.BoolVar(&options.kubernetes, "kubernetes", false, "deprecated alias for --scaler kubernetes")

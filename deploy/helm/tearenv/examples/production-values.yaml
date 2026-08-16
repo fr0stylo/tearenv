@@ -1,0 +1,36 @@
+# Match this tag to the chart version being installed.
+image:
+  tag: "0.2.0"
+
+# Create both Secrets before installation. Keep policy and tokens out of Helm values.
+bootstrap:
+  existingSecret: tearenv-bootstrap
+
+registration:
+  token:
+    existingSecret: tearenv-registration
+  # Keep registration cluster-local unless permanent self-service is required.
+  ingress:
+    enabled: false
+
+# Publish the SSH-only Service through the cluster's load balancer integration.
+service:
+  type: LoadBalancer
+
+persistence:
+  enabled: true
+  keep: true
+  size: 1Gi
+
+# List every namespace containing a workload managed by tearenv.
+scaler:
+  rbac:
+    namespaces:
+      - development
+
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    memory: 128Mi

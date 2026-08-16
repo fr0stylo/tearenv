@@ -27,7 +27,7 @@ func TestRootCommandExposesDeveloperWorkflow(t *testing.T) {
 		flags []string
 	}{
 		{path: []string{"login"}, flags: []string{
-			"api-url", "namespace", "server", "identity", "private-key", "registration", "config", "known-hosts", "insecure-skip-host-key-check",
+			"api-url", "namespace", "server", "identity", "registration-token-file", "private-key", "registration", "config", "known-hosts", "insecure-skip-host-key-check",
 		}},
 		{path: []string{"services"}, flags: []string{"config"}},
 		{path: []string{"connect"}, flags: []string{"config", "listen-host", "server", "identity", "private-key", "known-hosts", "insecure-skip-host-key-check"}},
@@ -116,6 +116,18 @@ func TestLoginCreatesLocalUserRegistration(t *testing.T) {
 		if got := info.Mode().Perm(); got != 0o600 {
 			t.Errorf("%s permissions = %o, want 600", path, got)
 		}
+	}
+}
+
+func TestLoadRegistrationTokenRejectsOpenPermissions(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "registration-token")
+	if err := os.WriteFile(path, make([]byte, 32), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadRegistrationToken(path); err == nil || !strings.Contains(err.Error(), "permissions") {
+		t.Fatalf("loadRegistrationToken() error = %v, want permissions error", err)
 	}
 }
 

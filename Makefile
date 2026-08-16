@@ -24,16 +24,7 @@ lint:
 	go tool golangci-lint run
 
 manifests:
-	helm lint deploy/helm/tearenv
-	helm template tearenv deploy/helm/tearenv --namespace tearenv-system >/dev/null
-	helm template tearenv deploy/helm/tearenv --namespace tearenv-system \
-		--set blueprint.enabled=true \
-		--set-file blueprint.document=deploy/kustomize/overlays/blueprint/environment-blueprint.yaml >/dev/null
-	kubectl kustomize deploy/kustomize/overlays/default >/dev/null
-	kubectl kustomize deploy/kustomize/overlays/blueprint >/dev/null
-	kubectl kustomize deploy/kustomize/overlays/load-balancer >/dev/null
-	kubectl kustomize deploy/kustomize/overlays/public-keys >/dev/null
-	kubectl kustomize deploy/kustomize/overlays/cluster-wide >/dev/null
+	sh hack/verify-deployment-assets.sh
 
 fmt:
 	gofmt -w $$(find cmd internal e2e -name '*.go')

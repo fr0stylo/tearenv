@@ -27,6 +27,7 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "tearenv.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- with .Values.imagePullSecrets }}
@@ -67,11 +68,12 @@ spec:
             {{- end }}
             - --users=/var/lib/tearenv/users.json
             - --host-key=/var/lib/tearenv/ssh_host_ed25519_key
+            - --api-listen=:{{ .Values.registration.port }}
+            - --registrations=/var/lib/tearenv/registrations
+            - --registration-namespace={{ .Values.registration.namespace }}
+            - --registration-token-file=/etc/tearenv/registration-auth/{{ .Values.registration.token.secretKey }}
             {{- if .Values.scaler.kubernetes.enabled }}
             - --scaler=kubernetes
-            {{- end }}
-            {{- if .Values.publicKeys.existingSecret }}
-            - --authorized-keys=/etc/tearenv/authorized-keys/{{ .Values.publicKeys.secretKey }}
             {{- end }}
             {{- if .Values.blueprint.enabled }}
             - --blueprint=/etc/tearenv/blueprint/{{ .Values.blueprint.configMapKey }}
@@ -80,21 +82,31 @@ spec:
             - name: ssh
               containerPort: 2222
               protocol: TCP
+            - name: registration
+              containerPort: {{ .Values.registration.port }}
+              protocol: TCP
             {{- if .Values.metrics.enabled }}
             - name: metrics
               containerPort: {{ .Values.metrics.port }}
               protocol: TCP
             {{- end }}
-          livenessProbe:
+          startupProbe:
             tcpSocket:
               port: ssh
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: 2
+            failureThreshold: 30
           readinessProbe:
-            tcpSocket:
-              port: ssh
-            initialDelaySeconds: 2
+            httpGet:
+              path: /readyz
+              port: registration
             periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: registration
+            periodSeconds: 10
+            failureThreshold: 3
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           securityContext:
@@ -102,11 +114,9 @@ spec:
           volumeMounts:
             - name: state
               mountPath: /var/lib/tearenv
-            {{- if .Values.publicKeys.existingSecret }}
-            - name: authorized-keys
-              mountPath: /etc/tearenv/authorized-keys
+            - name: registration-auth
+              mountPath: /etc/tearenv/registration-auth
               readOnly: true
-            {{- end }}
             {{- if .Values.blueprint.enabled }}
             - name: blueprint
               mountPath: /etc/tearenv/blueprint
@@ -127,15 +137,13 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
-        {{- if .Values.publicKeys.existingSecret }}
-        - name: authorized-keys
+        - name: registration-auth
           secret:
-            secretName: {{ .Values.publicKeys.existingSecret }}
-            defaultMode: 0444
+            secretName: {{ include "tearenv.registrationSecretName" . }}
+            defaultMode: 0440
             items:
-              - key: {{ .Values.publicKeys.secretKey }}
-                path: {{ .Values.publicKeys.secretKey }}
-        {{- end }}
+              - key: {{ .Values.registration.token.secretKey }}
+                path: {{ .Values.registration.token.secretKey }}
         {{- if .Values.blueprint.enabled }}
         - name: blueprint
           configMap:

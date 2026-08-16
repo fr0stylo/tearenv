@@ -2,8 +2,8 @@ apiVersion: v2
 name: tearenv
 description: SSH gateway for identity-scoped access to private development services
 type: application
-version: 0.1.0
-appVersion: "latest"
+version: 0.2.0
+appVersion: "0.2.0"
 home: https://github.com/fr0stylo/tearenv
 sources:
   - https://github.com/fr0stylo/tearenv
