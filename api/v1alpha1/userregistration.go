@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -30,6 +31,8 @@ const (
 	UserRegistrationResource = "userregistrations"
 	// ConditionAccepted reports whether the API has authorized a registration.
 	ConditionAccepted = "Accepted"
+	// AuthenticationMethodOIDC identifies a registration bound to an OIDC subject.
+	AuthenticationMethodOIDC = "oidc"
 )
 
 var validIdentity = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$`)
@@ -71,8 +74,17 @@ type SSHPublicKey struct {
 // UserRegistrationStatus is owned by the API server or a future controller.
 // Producers of registration requests should leave it unset.
 type UserRegistrationStatus struct {
-	ObservedGeneration int64              `json:"observedGeneration,omitempty"`
-	Conditions         []metav1.Condition `json:"conditions,omitempty"`
+	ObservedGeneration     int64                   `json:"observedGeneration,omitempty"`
+	AuthenticatedPrincipal *AuthenticatedPrincipal `json:"authenticatedPrincipal,omitempty"`
+	Conditions             []metav1.Condition      `json:"conditions,omitempty"`
+}
+
+// AuthenticatedPrincipal is the server-owned identity that created or adopted
+// a registration. Issuer and subject are public identifiers, not credentials.
+type AuthenticatedPrincipal struct {
+	Method  string `json:"method"`
+	Issuer  string `json:"issuer"`
+	Subject string `json:"subject"`
 }
 
 // ResourceName derives a stable Kubernetes-compatible metadata or key name
@@ -169,7 +181,28 @@ func (registration UserRegistration) Validate() error {
 	if expected := ResourceName(registration.Spec.Identity); registration.Name != expected {
 		return fmt.Errorf("metadata.name must be %q for spec.identity %q", expected, registration.Spec.Identity)
 	}
+	if err := validateAuthenticatedPrincipal(registration.Status); err != nil {
+		return err
+	}
 	return validatePublicKeys(registration.Spec.PublicKeys)
+}
+
+func validateAuthenticatedPrincipal(status *UserRegistrationStatus) error {
+	if status == nil || status.AuthenticatedPrincipal == nil {
+		return nil
+	}
+	principal := status.AuthenticatedPrincipal
+	if principal.Method != AuthenticationMethodOIDC {
+		return fmt.Errorf("status.authenticatedPrincipal.method must be %q", AuthenticationMethodOIDC)
+	}
+	issuer, err := url.Parse(principal.Issuer)
+	if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.RawQuery != "" || issuer.Fragment != "" {
+		return errors.New("status.authenticatedPrincipal.issuer must be an HTTPS URL without query or fragment")
+	}
+	if strings.TrimSpace(principal.Subject) == "" {
+		return errors.New("status.authenticatedPrincipal.subject is required")
+	}
+	return nil
 }
 
 func validatePublicKeys(publicKeys []SSHPublicKey) error {

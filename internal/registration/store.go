@@ -16,6 +16,7 @@ import (
 	"time"
 
 	v1alpha1 "github.com/fr0stylo/tearenv/api/v1alpha1"
+	"github.com/fr0stylo/tearenv/internal/authn"
 	"github.com/fr0stylo/tearenv/internal/authorization"
 	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +29,8 @@ var (
 	ErrNotFound = errors.New("user registration not found")
 	// ErrConflict reports an attempt to replace an existing registration spec.
 	ErrConflict = errors.New("user registration conflicts with the stored resource")
+	// ErrForbidden reports access by a principal that does not own a resource.
+	ErrForbidden = errors.New("user registration belongs to another principal")
 )
 
 // Store keeps API resources as protected YAML files and uses accepted keys for
@@ -66,11 +69,19 @@ func NewStore(root, authenticationNamespace string) (*Store, error) {
 // identical. Specs are immutable so an unauthenticated retry cannot replace a
 // previously registered key.
 func (store *Store) Put(registration v1alpha1.UserRegistration) (v1alpha1.UserRegistration, bool, error) {
+	return store.PutAs(registration, authn.Principal{Method: authn.MethodAnonymous})
+}
+
+// PutAs creates or adopts a registration for an authenticated principal.
+func (store *Store) PutAs(registration v1alpha1.UserRegistration, principal authn.Principal) (v1alpha1.UserRegistration, bool, error) {
 	if err := registration.Validate(); err != nil {
 		return v1alpha1.UserRegistration{}, false, err
 	}
 	if registration.Namespace == "" {
 		return v1alpha1.UserRegistration{}, false, errors.New("metadata.namespace is required")
+	}
+	if principal.Method == authn.MethodOIDC && principal.Identity != registration.Spec.Identity {
+		return v1alpha1.UserRegistration{}, false, ErrForbidden
 	}
 
 	store.mu.Lock()
@@ -79,6 +90,16 @@ func (store *Store) Put(registration v1alpha1.UserRegistration) (v1alpha1.UserRe
 	if err == nil {
 		if !reflect.DeepEqual(existing.Spec, registration.Spec) {
 			return v1alpha1.UserRegistration{}, false, ErrConflict
+		}
+		if principal.Method == authn.MethodOIDC {
+			if !registrationOwnedBy(existing, principal) {
+				if existing.Status != nil && existing.Status.AuthenticatedPrincipal != nil {
+					return v1alpha1.UserRegistration{}, false, ErrForbidden
+				}
+				if err := store.bindPrincipalUnlocked(&existing, principal); err != nil {
+					return v1alpha1.UserRegistration{}, false, err
+				}
+			}
 		}
 		return existing, false, nil
 	}
@@ -117,6 +138,9 @@ func (store *Store) Put(registration v1alpha1.UserRegistration) (v1alpha1.UserRe
 			}},
 		},
 	}
+	if principal.Method == authn.MethodOIDC {
+		stored.Status.AuthenticatedPrincipal = authenticatedPrincipal(principal)
+	}
 	contents, err := v1alpha1.MarshalUserRegistration(stored)
 	if err != nil {
 		return v1alpha1.UserRegistration{}, false, fmt.Errorf("encode stored user registration: %w", err)
@@ -125,6 +149,74 @@ func (store *Store) Put(registration v1alpha1.UserRegistration) (v1alpha1.UserRe
 		return v1alpha1.UserRegistration{}, false, err
 	}
 	return stored, true, nil
+}
+
+// GetAs loads a registration after enforcing principal ownership in OIDC mode.
+func (store *Store) GetAs(namespace, name string, principal authn.Principal) (v1alpha1.UserRegistration, error) {
+	registration, err := store.Get(namespace, name)
+	if err != nil {
+		return v1alpha1.UserRegistration{}, err
+	}
+	if principal.Method == authn.MethodOIDC && !registrationOwnedBy(registration, principal) {
+		return v1alpha1.UserRegistration{}, ErrForbidden
+	}
+	return registration, nil
+}
+
+// PublicKey returns one accepted key owned by principal.
+func (store *Store) PublicKey(namespace, name, keyName string, principal authn.Principal) (ssh.PublicKey, error) {
+	registration, err := store.GetAs(namespace, name, principal)
+	if err != nil {
+		return nil, err
+	}
+	if !registration.Accepted() {
+		return nil, ErrForbidden
+	}
+	for _, encoded := range registration.Spec.PublicKeys {
+		if encoded.Name != keyName {
+			continue
+		}
+		key, _, _, rest, parseErr := ssh.ParseAuthorizedKey([]byte(encoded.Key))
+		if parseErr != nil {
+			return nil, fmt.Errorf("parse stored public key %q: %w", encoded.Name, parseErr)
+		}
+		if len(bytes.TrimSpace(rest)) != 0 {
+			return nil, fmt.Errorf("stored public key %q contains trailing data", encoded.Name)
+		}
+		return key, nil
+	}
+	return nil, fmt.Errorf("%w: public key %q", ErrNotFound, keyName)
+}
+
+func (store *Store) bindPrincipalUnlocked(registration *v1alpha1.UserRegistration, principal authn.Principal) error {
+	identifier, err := randomIdentifier()
+	if err != nil {
+		return err
+	}
+	if registration.Status == nil {
+		registration.Status = &v1alpha1.UserRegistrationStatus{}
+	}
+	registration.Status.AuthenticatedPrincipal = authenticatedPrincipal(principal)
+	registration.ResourceVersion = identifier
+	contents, err := v1alpha1.MarshalUserRegistration(*registration)
+	if err != nil {
+		return fmt.Errorf("encode adopted user registration: %w", err)
+	}
+	return store.writeUnlocked(registration.Namespace, registration.Name, contents)
+}
+
+func authenticatedPrincipal(principal authn.Principal) *v1alpha1.AuthenticatedPrincipal {
+	return &v1alpha1.AuthenticatedPrincipal{
+		Method: v1alpha1.AuthenticationMethodOIDC, Issuer: principal.Issuer, Subject: principal.Subject,
+	}
+}
+
+func registrationOwnedBy(registration v1alpha1.UserRegistration, principal authn.Principal) bool {
+	if principal.Method != authn.MethodOIDC || registration.Status == nil || registration.Status.AuthenticatedPrincipal == nil {
+		return false
+	}
+	owner := registration.Status.AuthenticatedPrincipal
+	return owner.Method == v1alpha1.AuthenticationMethodOIDC && owner.Issuer == principal.Issuer && owner.Subject == principal.Subject
 }
 
 // Get loads one persisted registration.

@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fr0stylo/tearenv/internal/authn"
 	"github.com/fr0stylo/tearenv/internal/authorization"
 	"github.com/fr0stylo/tearenv/internal/blueprint"
 	"github.com/fr0stylo/tearenv/internal/environment"
@@ -21,6 +22,7 @@ import (
 	"github.com/fr0stylo/tearenv/internal/registration"
 	"github.com/fr0stylo/tearenv/internal/scaler"
 	"github.com/fr0stylo/tearenv/internal/server"
+	"github.com/fr0stylo/tearenv/internal/sshcert"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -87,7 +89,7 @@ func serve(ctx context.Context, options serveOptions) error {
 	if err != nil {
 		return err
 	}
-	registrationToken, err := loadOptionalSecret(options.registrationTokenPath)
+	authentication, err := configureAuthentication(ctx, options, registrationStore)
 	if err != nil {
 		return err
 	}
@@ -133,7 +135,7 @@ func serve(ctx context.Context, options serveOptions) error {
 	}
 	gateway := server.NewLifecycleGateway(policy, backend, slog.Default(), server.WithMetrics(metrics))
 	tunnelServer, err := server.New(server.Config{
-		Authenticator: registrationStore,
+		Authenticator: authentication.ssh,
 		Policy:        policy,
 		Provisioner:   provisioner,
 		Signer:        signer,
@@ -156,7 +158,11 @@ func serve(ctx context.Context, options serveOptions) error {
 			return fmt.Errorf("listen for registration API on %s: %w", options.apiAddress, err)
 		}
 		apiServer = &http.Server{
-			Handler:           registration.NewHandler(registrationStore, registrationToken),
+			Handler: registration.NewHandlerWithOptions(registrationStore, registration.HandlerOptions{
+				Authenticator: authentication.api,
+				Configuration: authentication.configuration,
+				TokenExchange: authentication.tokenExchange,
+			}),
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       15 * time.Second,
 			WriteTimeout:      15 * time.Second,
@@ -202,11 +208,146 @@ func serve(ctx context.Context, options serveOptions) error {
 		"users", options.usersPath,
 		"registrations", options.registrationsPath,
 		"registration_namespace", options.registrationNamespace,
+		"registration_authentication", authentication.configuration.Mode,
 		"blueprint", options.blueprintPath,
 		"scaler", selectedScaler,
 		"host_key_fingerprint", ssh.FingerprintSHA256(signer.PublicKey()),
 	)
 	return serveListeners(ctx, tunnelServer, listener, apiServer, apiListener, metricsServer, metricsListener)
+}
+
+type authenticationRuntime struct {
+	api           authn.Authenticator
+	ssh           authorization.Authenticator
+	configuration authn.Configuration
+	tokenExchange http.Handler
+}
+
+func configureAuthentication(ctx context.Context, options serveOptions, store *registration.Store) (authenticationRuntime, error) {
+	mode := strings.ToLower(strings.TrimSpace(options.registrationAuthMode))
+	hasOIDC := strings.TrimSpace(options.oidcIssuerURL) != "" || strings.TrimSpace(options.oidcClientID) != "" ||
+		strings.TrimSpace(options.oidcAudience) != "" || strings.TrimSpace(options.sshUserCAKeyPath) != "" ||
+		strings.TrimSpace(options.oidcCAPath) != ""
+	hasToken := strings.TrimSpace(options.registrationTokenPath) != ""
+	if mode == "" {
+		switch {
+		case hasOIDC && hasToken:
+			return authenticationRuntime{}, errors.New("OIDC and registration token authentication are mutually exclusive")
+		case hasOIDC:
+			mode = authn.MethodOIDC
+		case hasToken:
+			mode = authn.MethodToken
+		default:
+			mode = authn.MethodAnonymous
+		}
+	}
+
+	switch mode {
+	case authn.MethodAnonymous:
+		if hasOIDC || hasToken {
+			return authenticationRuntime{}, errors.New("anonymous authentication cannot be combined with token or OIDC options")
+		}
+		if !loopbackListenAddress(options.apiAddress) {
+			return authenticationRuntime{}, errors.New("unauthenticated registration API must listen on a loopback address")
+		}
+		return authenticationRuntime{
+			api: authn.Anonymous{}, ssh: store,
+			configuration: authn.Configuration{Mode: authn.MethodAnonymous},
+		}, nil
+	case authn.MethodToken:
+		if hasOIDC {
+			return authenticationRuntime{}, errors.New("token authentication cannot be combined with OIDC options")
+		}
+		token, err := loadOptionalSecret(options.registrationTokenPath)
+		if err != nil {
+			return authenticationRuntime{}, err
+		}
+		if token == "" {
+			return authenticationRuntime{}, errors.New("--registration-token-file is required in token authentication mode")
+		}
+		authenticator, err := authn.NewStaticToken(token)
+		if err != nil {
+			return authenticationRuntime{}, err
+		}
+		return authenticationRuntime{
+			api: authenticator, ssh: store,
+			configuration: authn.Configuration{Mode: authn.MethodToken},
+		}, nil
+	case authn.MethodOIDC:
+		if hasToken {
+			return authenticationRuntime{}, errors.New("OIDC authentication cannot be combined with --registration-token-file")
+		}
+		if strings.TrimSpace(options.oidcClientID) == "" {
+			return authenticationRuntime{}, errors.New("--oidc-client-id is required in OIDC authentication mode")
+		}
+		if strings.TrimSpace(options.sshUserCAKeyPath) == "" {
+			return authenticationRuntime{}, errors.New("--ssh-user-ca-key is required in OIDC authentication mode")
+		}
+		subjectTokenTypeValue := strings.TrimSpace(options.oidcSubjectTokenType)
+		if subjectTokenTypeValue == "" {
+			subjectTokenTypeValue = "id-token"
+		}
+		subjectTokenType, err := authn.NormalizeSubjectTokenType(subjectTokenTypeValue)
+		if err != nil {
+			return authenticationRuntime{}, err
+		}
+		oidcAuthenticator, err := authn.NewOIDC(ctx, authn.OIDCConfig{
+			IssuerURL: options.oidcIssuerURL, ClientID: options.oidcClientID, Audience: options.oidcAudience,
+			IdentityClaim: options.oidcIdentityClaim, SubjectTokenType: subjectTokenType, CAFile: options.oidcCAPath,
+		})
+		if err != nil {
+			return authenticationRuntime{}, err
+		}
+		caSigner, err := sshcert.LoadSigner(options.sshUserCAKeyPath)
+		if err != nil {
+			return authenticationRuntime{}, err
+		}
+		certificateIssuer, err := sshcert.NewIssuer(caSigner, options.sshCertificateTTL, options.sshCertificateSkew)
+		if err != nil {
+			return authenticationRuntime{}, fmt.Errorf("configure SSH certificate issuer: %w", err)
+		}
+		certificateAuthenticator, err := authorization.NewCertificateAuthority(certificateIssuer.PublicKey())
+		if err != nil {
+			return authenticationRuntime{}, err
+		}
+		configuration := authn.Configuration{
+			Mode:          authn.MethodOIDC,
+			TokenEndpoint: "/oauth/token",
+			OIDC: &authn.OIDCConfiguration{
+				IssuerURL: options.oidcIssuerURL, ClientID: options.oidcClientID, Audience: options.oidcAudience,
+				Scopes: options.oidcScopes, IdentityClaim: options.oidcIdentityClaim,
+				SubjectTokenType: subjectTokenType, DeviceFlow: options.oidcDeviceFlow,
+			},
+		}.Normalized()
+		exchange, err := registration.NewTokenExchangeHandler(registration.TokenExchangeOptions{
+			Authenticator:    oidcAuthenticator,
+			Store:            store,
+			Issuer:           certificateIssuer,
+			Namespace:        options.registrationNamespace,
+			Audience:         options.oidcAudience,
+			SubjectTokenType: subjectTokenType,
+		})
+		if err != nil {
+			return authenticationRuntime{}, fmt.Errorf("configure token exchange: %w", err)
+		}
+		return authenticationRuntime{
+			api: oidcAuthenticator, ssh: certificateAuthenticator, configuration: configuration, tokenExchange: exchange,
+		}, nil
+	default:
+		return authenticationRuntime{}, fmt.Errorf("unsupported registration authentication mode %q (supported: token, oidc)", mode)
+	}
+}
+
+func loopbackListenAddress(address string) bool {
+	if strings.TrimSpace(address) == "" {
+		return true
+	}
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())
 }
 
 func loadOptionalSecret(path string) (string, error) {

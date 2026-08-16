@@ -54,6 +54,7 @@ spec:
             - --api-listen=:8080
             - --registrations=/var/lib/tearenv/registrations
             - --registration-namespace=default
+            - --registration-auth-mode=token
             - --registration-token-file=/etc/tearenv/registration-auth/token
             - --scaler=kubernetes
           ports:

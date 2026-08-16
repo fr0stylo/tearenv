@@ -7,3 +7,8 @@ appVersion: "0.2.0"
 home: https://github.com/fr0stylo/tearenv
 sources:
   - https://github.com/fr0stylo/tearenv
+dependencies:
+  - name: dex
+    version: 0.24.1
+    repository: https://charts.dexidp.io
+    condition: dex.enabled

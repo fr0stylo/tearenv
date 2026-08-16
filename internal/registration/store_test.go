@@ -1,6 +1,7 @@
 package registration
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -11,6 +12,7 @@ import (
 	"testing"
 
 	v1alpha1 "github.com/fr0stylo/tearenv/api/v1alpha1"
+	"github.com/fr0stylo/tearenv/internal/authn"
 	"github.com/fr0stylo/tearenv/internal/authorization"
 	"golang.org/x/crypto/ssh"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -83,6 +85,80 @@ func TestStorePutIsIdempotentAndImmutable(t *testing.T) {
 	_, _, err = store.Put(registration)
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("changed Put() error = %v, want ErrConflict", err)
+	}
+}
+
+func TestStoreBindsOIDCPrincipalAndRejectsAnotherSubject(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewStore(t.TempDir(), "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, publicKey := testRegistration(t)
+	owner := authn.Principal{
+		Method: authn.MethodOIDC, Issuer: "https://issuer.example.com", Subject: "subject-alice", Identity: "alice",
+	}
+	stored, created, err := store.PutAs(registration, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || stored.Status == nil || stored.Status.AuthenticatedPrincipal == nil {
+		t.Fatalf("PutAs() did not persist principal: %#v", stored.Status)
+	}
+	if _, err := store.PublicKey("default", "alice", "laptop", owner); err != nil {
+		t.Fatalf("PublicKey() for owner: %v", err)
+	}
+	if got, err := store.PublicKey("default", "alice", "laptop", owner); err != nil || !bytes.Equal(got.Marshal(), publicKey.Marshal()) {
+		t.Fatalf("PublicKey() = (%v, %v), want registered key", got, err)
+	}
+
+	other := owner
+	other.Subject = "subject-bob"
+	if _, err := store.GetAs("default", "alice", other); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("GetAs() error = %v, want ErrForbidden", err)
+	}
+	if _, _, err := store.PutAs(registration, other); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("PutAs() error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestStoreAdoptsMatchingUnownedRegistration(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewStore(t.TempDir(), "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, _ := testRegistration(t)
+	if _, _, err := store.Put(registration); err != nil {
+		t.Fatal(err)
+	}
+	owner := authn.Principal{
+		Method: authn.MethodOIDC, Issuer: "https://issuer.example.com", Subject: "subject-alice", Identity: "alice",
+	}
+	adopted, created, err := store.PutAs(registration, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || adopted.Status == nil || adopted.Status.AuthenticatedPrincipal == nil {
+		t.Fatalf("PutAs() = (created %t, status %#v), want adopted owner", created, adopted.Status)
+	}
+}
+
+func TestStoreRejectsOIDCIdentityMismatch(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewStore(t.TempDir(), "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, _ := testRegistration(t)
+	principal := authn.Principal{
+		Method: authn.MethodOIDC, Issuer: "https://issuer.example.com", Subject: "subject-bob", Identity: "bob",
+	}
+	if _, _, err := store.PutAs(registration, principal); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("PutAs() error = %v, want ErrForbidden", err)
 	}
 }
 

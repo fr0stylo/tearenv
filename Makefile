@@ -15,6 +15,7 @@ e2e:
 	go test -count=1 ./e2e
 
 e2e-kind:
+	sh hack/prepare-helm-dependencies.sh
 	TEARENV_KIND_E2E=1 go test -count=1 -run TestKubernetesScalingWithKind -timeout=10m ./e2e
 
 vet:

@@ -46,3 +46,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "tearenv.registrationSecretName" -}}
 {{- default (printf "%s-registration" (include "tearenv.fullname" .)) .Values.registration.token.existingSecret }}
 {{- end }}
+
+{{- define "tearenv.sshUserCASecretName" -}}
+{{- required "registration.oidc.sshUserCA.existingSecret is required in OIDC mode" .Values.registration.oidc.sshUserCA.existingSecret }}
+{{- end }}
+
+{{- define "tearenv.oidcIssuerURL" -}}
+{{- if eq .Values.registration.oidc.provider "bundledDex" -}}
+{{- required "dex.config.issuer is required with bundled Dex" .Values.dex.config.issuer -}}
+{{- else -}}
+{{- required "registration.oidc.issuerURL is required with external OIDC" .Values.registration.oidc.issuerURL -}}
+{{- end -}}
+{{- end }}

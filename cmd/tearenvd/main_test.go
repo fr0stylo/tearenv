@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/fr0stylo/tearenv/internal/blueprint"
+	"github.com/fr0stylo/tearenv/internal/registration"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +36,11 @@ func TestRootCommandExposesGatewayWorkflow(t *testing.T) {
 	}{
 		{path: []string{"serve"}, flags: []string{
 			"listen", "api-listen", "metrics-listen", "host-key", "users", "registrations",
-			"registration-namespace", "registration-token-file", "blueprint", "scaler", "kubernetes",
+			"registration-namespace", "registration-auth-mode", "registration-token-file",
+			"oidc-issuer-url", "oidc-client-id", "oidc-audience", "oidc-identity-claim", "oidc-scopes",
+			"oidc-subject-token-type", "oidc-device-flow", "oidc-ca-file", "ssh-user-ca-key",
+			"ssh-certificate-ttl", "ssh-certificate-clock-skew",
+			"blueprint", "scaler", "kubernetes",
 		}},
 		{path: []string{"service", "grant"}, flags: []string{
 			"users", "identity", "name", "target", "local-port", "workload-kind",
@@ -50,6 +56,32 @@ func TestRootCommandExposesGatewayWorkflow(t *testing.T) {
 				if command.Flags().Lookup(name) == nil {
 					t.Errorf("flag --%s is missing", name)
 				}
+			}
+		})
+	}
+}
+
+func TestConfigureAuthenticationRejectsUnsafeOrMixedModes(t *testing.T) {
+	store, err := registration.NewStore(t.TempDir(), "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		options serveOptions
+		want    string
+	}{
+		{name: "anonymous non-loopback", options: serveOptions{apiAddress: ":8080"}, want: "loopback"},
+		{name: "token missing file", options: serveOptions{apiAddress: "127.0.0.1:8080", registrationAuthMode: "token"}, want: "registration-token-file"},
+		{name: "mixed inferred", options: serveOptions{
+			apiAddress: "127.0.0.1:8080", registrationTokenPath: "token", oidcIssuerURL: "https://id.example.com",
+		}, want: "mutually exclusive"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := configureAuthentication(context.Background(), test.options, store)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("configureAuthentication() error = %v, want %q", err, test.want)
 			}
 		})
 	}

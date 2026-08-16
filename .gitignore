@@ -3,3 +3,4 @@
 .serena/
 .agents/
 /*.json
+/deploy/helm/tearenv/charts/

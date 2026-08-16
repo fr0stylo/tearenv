@@ -10,12 +10,17 @@ import (
 )
 
 type Profile struct {
-	ServerAddress string `json:"server"`
-	Identity      string `json:"identity"`
-	Token         string `json:"token,omitempty"`
-	PrivateKey    string `json:"private_key,omitempty"`
-	KnownHosts    string `json:"known_hosts,omitempty"`
-	Insecure      bool   `json:"insecure_skip_host_key_check,omitempty"`
+	ServerAddress      string `json:"server"`
+	APIURL             string `json:"api_url,omitempty"`
+	Namespace          string `json:"namespace,omitempty"`
+	Identity           string `json:"identity"`
+	AuthenticationMode string `json:"authentication_mode,omitempty"`
+	KeyName            string `json:"key_name,omitempty"`
+	OIDCDevice         bool   `json:"oidc_device,omitempty"`
+	Token              string `json:"token,omitempty"`
+	PrivateKey         string `json:"private_key,omitempty"`
+	KnownHosts         string `json:"known_hosts,omitempty"`
+	Insecure           bool   `json:"insecure_skip_host_key_check,omitempty"`
 }
 
 func Load(path string) (*Profile, error) {
@@ -85,6 +90,11 @@ func (profile Profile) validate() error {
 	}
 	if profile.Token == "" && profile.PrivateKey == "" {
 		return errors.New("token or private key is required")
+	}
+	if profile.AuthenticationMode == "oidc" {
+		if profile.APIURL == "" || profile.Namespace == "" || profile.KeyName == "" || profile.PrivateKey == "" {
+			return errors.New("OIDC profile requires API URL, namespace, key name, and private key")
+		}
 	}
 	if !profile.Insecure && profile.KnownHosts == "" {
 		return errors.New("known-hosts path is required")

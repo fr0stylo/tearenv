@@ -1,6 +1,40 @@
 {{- if and .Values.blueprint.enabled (not .Values.scaler.kubernetes.enabled) }}
 {{- fail "blueprint.enabled requires scaler.kubernetes.enabled" }}
 {{- end }}
+{{- if not (has .Values.registration.authMode (list "token" "oidc")) }}
+{{- fail "registration.authMode must be token or oidc" }}
+{{- end }}
+{{- if eq .Values.registration.authMode "oidc" }}
+{{- $_ := required "registration.oidc.clientID is required in OIDC mode" .Values.registration.oidc.clientID }}
+{{- $_ := required "registration.oidc.audience is required in OIDC mode" .Values.registration.oidc.audience }}
+{{- $_ := required "registration.oidc.sshUserCA.existingSecret is required in OIDC mode" .Values.registration.oidc.sshUserCA.existingSecret }}
+{{- if not (has .Values.registration.oidc.provider (list "external" "bundledDex")) }}
+{{- fail "registration.oidc.provider must be external or bundledDex" }}
+{{- end }}
+{{- if and (eq .Values.registration.oidc.provider "bundledDex") (not .Values.dex.enabled) }}
+{{- fail "registration.oidc.provider=bundledDex requires dex.enabled=true" }}
+{{- end }}
+{{- if and (eq .Values.registration.oidc.provider "external") .Values.dex.enabled }}
+{{- fail "dex.enabled=true requires registration.oidc.provider=bundledDex" }}
+{{- end }}
+{{- if and (eq .Values.registration.oidc.provider "bundledDex") (ne .Values.registration.oidc.subjectTokenType "id-token") }}
+{{- fail "bundled Dex requires registration.oidc.subjectTokenType=id-token" }}
+{{- end }}
+{{- if eq .Values.registration.oidc.provider "bundledDex" }}
+{{- $clientFound := false }}
+{{- range .Values.dex.config.staticClients }}
+{{- if and (eq (get . "id") $.Values.registration.oidc.clientID) (eq (get . "public") true) }}
+{{- $clientFound = true }}
+{{- end }}
+{{- end }}
+{{- if not $clientFound }}
+{{- fail "dex.config.staticClients must contain the public registration.oidc.clientID client" }}
+{{- end }}
+{{- end }}
+{{- $_ := include "tearenv.oidcIssuerURL" . }}
+{{- else if .Values.dex.enabled }}
+{{- fail "dex.enabled=true requires registration.authMode=oidc" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -71,7 +105,24 @@ spec:
             - --api-listen=:{{ .Values.registration.port }}
             - --registrations=/var/lib/tearenv/registrations
             - --registration-namespace={{ .Values.registration.namespace }}
+            - --registration-auth-mode={{ .Values.registration.authMode }}
+            {{- if eq .Values.registration.authMode "token" }}
             - --registration-token-file=/etc/tearenv/registration-auth/{{ .Values.registration.token.secretKey }}
+            {{- else }}
+            - --oidc-issuer-url={{ include "tearenv.oidcIssuerURL" . }}
+            - --oidc-client-id={{ .Values.registration.oidc.clientID }}
+            - --oidc-audience={{ .Values.registration.oidc.audience }}
+            - --oidc-identity-claim={{ .Values.registration.oidc.identityClaim }}
+            - --oidc-scopes={{ join "," .Values.registration.oidc.scopes }}
+            - --oidc-subject-token-type={{ .Values.registration.oidc.subjectTokenType }}
+            - --oidc-device-flow={{ .Values.registration.oidc.deviceFlow }}
+            {{- if .Values.registration.oidc.ca.existingSecret }}
+            - --oidc-ca-file=/etc/tearenv/oidc-ca/{{ .Values.registration.oidc.ca.secretKey }}
+            {{- end }}
+            - --ssh-user-ca-key=/etc/tearenv/ssh-user-ca/{{ .Values.registration.oidc.sshUserCA.secretKey }}
+            - --ssh-certificate-ttl={{ .Values.registration.oidc.sshUserCA.certificateTTL }}
+            - --ssh-certificate-clock-skew={{ .Values.registration.oidc.sshUserCA.clockSkew }}
+            {{- end }}
             {{- if .Values.scaler.kubernetes.enabled }}
             - --scaler=kubernetes
             {{- end }}
@@ -115,8 +166,13 @@ spec:
             - name: state
               mountPath: /var/lib/tearenv
             - name: registration-auth
-              mountPath: /etc/tearenv/registration-auth
+              mountPath: {{ if eq .Values.registration.authMode "token" }}/etc/tearenv/registration-auth{{ else }}/etc/tearenv/ssh-user-ca{{ end }}
               readOnly: true
+            {{- if and (eq .Values.registration.authMode "oidc") .Values.registration.oidc.ca.existingSecret }}
+            - name: oidc-ca
+              mountPath: /etc/tearenv/oidc-ca
+              readOnly: true
+            {{- end }}
             {{- if .Values.blueprint.enabled }}
             - name: blueprint
               mountPath: /etc/tearenv/blueprint
@@ -139,11 +195,25 @@ spec:
           {{- end }}
         - name: registration-auth
           secret:
-            secretName: {{ include "tearenv.registrationSecretName" . }}
+            secretName: {{ if eq .Values.registration.authMode "token" }}{{ include "tearenv.registrationSecretName" . }}{{ else }}{{ include "tearenv.sshUserCASecretName" . }}{{ end }}
             defaultMode: 0440
             items:
+              {{- if eq .Values.registration.authMode "token" }}
               - key: {{ .Values.registration.token.secretKey }}
                 path: {{ .Values.registration.token.secretKey }}
+              {{- else }}
+              - key: {{ .Values.registration.oidc.sshUserCA.secretKey }}
+                path: {{ .Values.registration.oidc.sshUserCA.secretKey }}
+              {{- end }}
+        {{- if and (eq .Values.registration.authMode "oidc") .Values.registration.oidc.ca.existingSecret }}
+        - name: oidc-ca
+          secret:
+            secretName: {{ .Values.registration.oidc.ca.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.registration.oidc.ca.secretKey }}
+                path: {{ .Values.registration.oidc.ca.secretKey }}
+        {{- end }}
         {{- if .Values.blueprint.enabled }}
         - name: blueprint
           configMap:

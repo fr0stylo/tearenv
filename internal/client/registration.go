@@ -32,6 +32,11 @@ func WithRegistrationToken(token string) RegistrationRequestOption {
 	}
 }
 
+// WithBearerToken authenticates registration with an OIDC subject token.
+func WithBearerToken(token string) RegistrationRequestOption {
+	return WithRegistrationToken(token)
+}
+
 // SubmitUserRegistration stores a registration through the tearenv resource
 // API and returns the server-owned representation.
 func SubmitUserRegistration(

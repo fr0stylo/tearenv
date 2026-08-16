@@ -23,16 +23,54 @@
     },
     "registration": {
       "type": "object",
-      "required": ["namespace", "port", "token", "ingress"],
+      "required": ["namespace", "port", "authMode", "token", "oidc", "ingress"],
       "properties": {
         "namespace": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63 },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "authMode": { "enum": ["token", "oidc"] },
         "token": {
           "type": "object",
           "required": ["existingSecret", "secretKey"],
           "properties": {
             "existingSecret": { "type": "string" },
             "secretKey": { "type": "string", "minLength": 1 }
+          }
+        },
+        "oidc": {
+          "type": "object",
+          "required": ["provider", "issuerURL", "clientID", "audience", "identityClaim", "subjectTokenType", "scopes", "deviceFlow", "ca", "sshUserCA"],
+          "properties": {
+            "provider": { "enum": ["external", "bundledDex"] },
+            "issuerURL": { "type": "string" },
+            "clientID": { "type": "string" },
+            "audience": { "type": "string" },
+            "identityClaim": { "type": "string", "minLength": 1 },
+            "subjectTokenType": { "enum": ["id-token", "access-token"] },
+            "scopes": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "deviceFlow": { "type": "boolean" },
+            "ca": {
+              "type": "object",
+              "required": ["existingSecret", "secretKey"],
+              "properties": {
+                "existingSecret": { "type": "string" },
+                "secretKey": { "type": "string", "minLength": 1 }
+              }
+            },
+            "sshUserCA": {
+              "type": "object",
+              "required": ["existingSecret", "secretKey", "certificateTTL", "clockSkew"],
+              "properties": {
+                "existingSecret": { "type": "string" },
+                "secretKey": { "type": "string", "minLength": 1 },
+                "certificateTTL": { "type": "string", "pattern": "^[0-9]+(s|m|h)$" },
+                "clockSkew": { "type": "string", "pattern": "^[0-9]+(s|m)$" }
+              }
+            }
           }
         },
         "ingress": {
@@ -54,7 +92,25 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "authMode": { "const": "oidc" } } },
+          "then": {
+            "properties": {
+              "oidc": {
+                "properties": {
+                  "clientID": { "minLength": 1 },
+                  "audience": { "minLength": 1 },
+                  "sshUserCA": {
+                    "properties": { "existingSecret": { "minLength": 1 } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "metrics": {
       "type": "object",
@@ -122,6 +178,92 @@
           }
         }
       }
+    },
+    "dex": {
+      "type": "object",
+      "required": ["enabled", "config"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "config": {
+          "type": "object",
+          "required": ["issuer", "storage", "staticClients", "connectors"],
+          "properties": {
+            "issuer": { "type": "string" },
+            "storage": { "type": "object" },
+            "staticClients": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "type": "object" }
+            },
+            "connectors": { "type": "array" }
+          }
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "registration": {
+            "properties": {
+              "authMode": { "const": "oidc" },
+              "oidc": { "properties": { "provider": { "const": "external" } } }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "registration": {
+            "properties": {
+              "oidc": { "properties": { "issuerURL": { "pattern": "^https://[^/?#]+" } } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "registration": { "properties": { "authMode": { "const": "token" } } } }
+      },
+      "then": { "properties": { "dex": { "properties": { "enabled": { "const": false } } } } }
+    },
+    {
+      "if": { "properties": { "dex": { "properties": { "enabled": { "const": true } } } } },
+      "then": {
+        "properties": {
+          "registration": {
+            "properties": {
+              "authMode": { "const": "oidc" },
+              "oidc": {
+                "properties": {
+                  "provider": { "const": "bundledDex" },
+                  "subjectTokenType": { "const": "id-token" }
+                }
+              }
+            }
+          },
+          "dex": {
+            "properties": {
+              "config": { "properties": { "issuer": { "pattern": "^https://[^/?#]+" } } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "registration": {
+            "properties": {
+              "authMode": { "const": "oidc" },
+              "oidc": { "properties": { "provider": { "const": "bundledDex" } } }
+            }
+          }
+        }
+      },
+      "then": { "properties": { "dex": { "properties": { "enabled": { "const": true } } } } }
+    }
+  ]
 }
