@@ -55,15 +55,19 @@ The API response must contain the stored resource. Login writes its local profil
 ```yaml
 status:
   observedGeneration: 1
+  authenticatedPrincipal:
+    method: oidc
+    issuer: https://id.example.com
+    subject: 00u123456789
   conditions:
     - type: Accepted
       status: "True"
       reason: AcceptedByDefault
 ```
 
-An identical `PUT` is idempotent and returns the original resource. The stored spec is immutable: changing the identity or public key at the same resource path returns `409 Conflict`. This first-write-wins rule prevents an unauthenticated retry from silently replacing an existing key.
+An identical `PUT` is idempotent and returns the original resource. The stored spec is immutable: changing the identity or public key at the same resource path returns `409 Conflict`. In OIDC mode, `authenticatedPrincipal` is server-owned and binds the resource to the verified issuer and subject. It contains no bearer token.
 
-By default, `tearenvd` stores resources as protected YAML under `.data/registrations/{namespace}/{name}.yaml`. It authenticates SSH public keys directly from accepted resources in the namespace selected by `--registration-namespace`. The CLI's local copy isn't authoritative.
+By default, `tearenvd` stores resources as protected YAML under `.data/registrations/{namespace}/{name}.yaml`. Token mode authenticates SSH public keys directly from accepted resources. OIDC mode uses the accepted key only when exchanging a verified ID token or RFC 9068 access token for a short-lived, CA-signed SSH certificate. The CLI's local copy isn't authoritative.
 
 A future controller can watch the same API shape and reconcile it into another authentication backend without changing the client document.
 

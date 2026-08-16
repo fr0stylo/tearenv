@@ -43,7 +43,19 @@ type serveOptions struct {
 	usersPath             string
 	registrationsPath     string
 	registrationNamespace string
+	registrationAuthMode  string
 	registrationTokenPath string
+	oidcIssuerURL         string
+	oidcClientID          string
+	oidcAudience          string
+	oidcIdentityClaim     string
+	oidcScopes            []string
+	oidcSubjectTokenType  string
+	oidcDeviceFlow        bool
+	oidcCAPath            string
+	sshUserCAKeyPath      string
+	sshCertificateTTL     time.Duration
+	sshCertificateSkew    time.Duration
 	blueprintPath         string
 	scalerName            string
 	kubernetes            bool
@@ -142,6 +154,11 @@ func newServeCommand() *cobra.Command {
 		usersPath:             defaultUsersPath,
 		registrationsPath:     defaultRegistrationsPath,
 		registrationNamespace: defaultRegistrationNamespace,
+		oidcIdentityClaim:     "preferred_username",
+		oidcScopes:            []string{"openid", "profile"},
+		oidcSubjectTokenType:  "id-token",
+		sshCertificateTTL:     10 * time.Minute,
+		sshCertificateSkew:    30 * time.Second,
 	}
 	command := &cobra.Command{
 		Use:   "serve",
@@ -159,7 +176,19 @@ func newServeCommand() *cobra.Command {
 	flags.StringVar(&options.usersPath, "users", options.usersPath, "identity-bound service policy JSON file")
 	flags.StringVar(&options.registrationsPath, "registrations", options.registrationsPath, "durable UserRegistration store directory")
 	flags.StringVar(&options.registrationNamespace, "registration-namespace", options.registrationNamespace, "namespace used for SSH authentication")
+	flags.StringVar(&options.registrationAuthMode, "registration-auth-mode", "", "registration authentication mode (token or oidc); inferred when empty")
 	flags.StringVar(&options.registrationTokenPath, "registration-token-file", "", "file containing the registration API bearer token; empty disables API authentication")
+	flags.StringVar(&options.oidcIssuerURL, "oidc-issuer-url", "", "trusted OIDC issuer URL")
+	flags.StringVar(&options.oidcClientID, "oidc-client-id", "", "public OIDC client ID advertised to tearenv clients")
+	flags.StringVar(&options.oidcAudience, "oidc-audience", "", "required OIDC access-token and SSH token-exchange audience")
+	flags.StringVar(&options.oidcIdentityClaim, "oidc-identity-claim", options.oidcIdentityClaim, "OIDC claim mapped to the tearenv identity")
+	flags.StringSliceVar(&options.oidcScopes, "oidc-scopes", options.oidcScopes, "OIDC scopes requested by tearenv clients")
+	flags.StringVar(&options.oidcSubjectTokenType, "oidc-subject-token-type", options.oidcSubjectTokenType, "OIDC token exchanged by clients (id-token or access-token)")
+	flags.BoolVar(&options.oidcDeviceFlow, "oidc-device-flow", false, "advertise OIDC device authorization support")
+	flags.StringVar(&options.oidcCAPath, "oidc-ca-file", "", "PEM CA certificates used to verify the OIDC issuer")
+	flags.StringVar(&options.sshUserCAKeyPath, "ssh-user-ca-key", "", "SSH user certificate authority private key (OIDC mode)")
+	flags.DurationVar(&options.sshCertificateTTL, "ssh-certificate-ttl", options.sshCertificateTTL, "lifetime of exchanged SSH user certificates")
+	flags.DurationVar(&options.sshCertificateSkew, "ssh-certificate-clock-skew", options.sshCertificateSkew, "SSH certificate not-before clock skew allowance")
 	flags.StringVar(&options.blueprintPath, "blueprint", "", "team environment blueprint provisioned for every authenticated identity")
 	flags.StringVar(&options.scalerName, "scaler", "", "workload scaler backend (supported: kubernetes)")
 	flags.BoolVar(&options.kubernetes, "kubernetes", false, "deprecated alias for --scaler kubernetes")

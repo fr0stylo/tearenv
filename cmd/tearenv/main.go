@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"syscall"
 
 	v1alpha1 "github.com/fr0stylo/tearenv/api/v1alpha1"
+	"github.com/fr0stylo/tearenv/internal/authn"
 	"github.com/fr0stylo/tearenv/internal/client"
 	"github.com/fr0stylo/tearenv/internal/profile"
 	"github.com/fr0stylo/tearenv/internal/protocol"
@@ -33,18 +35,54 @@ func main() {
 }
 
 func login(ctx context.Context, options loginOptions, input io.Reader, output, prompts io.Writer) error {
-	identity, err := loginIdentity(options.identity, options.identityDefault, input, prompts)
-	if err != nil {
-		return err
-	}
 	registrationToken, err := loadRegistrationToken(options.registrationTokenPath)
 	if err != nil {
 		return err
+	}
+	authentication := authn.Configuration{Mode: authn.MethodAnonymous}
+	var discoveryErr error
+	if options.discoverAuthentication {
+		authentication, discoveryErr = client.DiscoverAuthentication(ctx, options.httpClient, options.apiURL)
+	}
+	if discoveryErr != nil {
+		// Servers predating authentication discovery remain usable during migration.
+		authentication.Mode = authn.MethodAnonymous
+		if registrationToken != "" {
+			authentication.Mode = authn.MethodToken
+		}
+	}
+	var identity string
+	var bearerToken string
+	if authentication.Mode == authn.MethodOIDC {
+		if registrationToken != "" {
+			return errors.New("--registration-token-file cannot be used when the server requires OIDC")
+		}
+		if authentication.OIDC == nil {
+			return errors.New("server advertised OIDC without client configuration")
+		}
+		oidcLogin, err := client.OIDCLogin(ctx, options.httpClient, *authentication.OIDC, client.OIDCLoginOptions{
+			Device: options.oidcDevice, Output: prompts,
+		})
+		if err != nil {
+			return err
+		}
+		identity = oidcLogin.Identity
+		bearerToken = oidcLogin.SubjectToken
+		if requested := strings.TrimSpace(options.identity); requested != "" && requested != identity {
+			return fmt.Errorf("requested identity %q does not match OIDC identity %q", requested, identity)
+		}
+	} else {
+		identity, err = loginIdentity(options.identity, options.identityDefault, input, prompts)
+		if err != nil {
+			return err
+		}
+		bearerToken = registrationToken
 	}
 	signer, err := client.LoadOrCreatePrivateKey(options.privateKeyPath, identity)
 	if err != nil {
 		return err
 	}
+	keyName := v1alpha1.KeyName(options.identityDefault)
 	registration := v1alpha1.UserRegistration{
 		TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.APIVersion, Kind: v1alpha1.UserRegistrationKind},
 		ObjectMeta: metav1.ObjectMeta{
@@ -54,7 +92,7 @@ func login(ctx context.Context, options loginOptions, input io.Reader, output, p
 		Spec: v1alpha1.UserRegistrationSpec{
 			Identity: identity,
 			PublicKeys: []v1alpha1.SSHPublicKey{{
-				Name: v1alpha1.KeyName(options.identityDefault),
+				Name: keyName,
 				Key:  strings.TrimSpace(string(ssh.MarshalAuthorizedKey(signer.PublicKey()))),
 			}},
 		},
@@ -67,7 +105,7 @@ func login(ctx context.Context, options loginOptions, input io.Reader, output, p
 		return fmt.Errorf("save user registration: %w", err)
 	}
 	accepted, err := client.SubmitUserRegistration(ctx, options.httpClient, options.apiURL, registration,
-		client.WithRegistrationToken(registrationToken))
+		client.WithBearerToken(bearerToken))
 	if err != nil {
 		if accepted.APIVersion != "" {
 			if acceptedContents, marshalErr := v1alpha1.MarshalUserRegistration(accepted); marshalErr == nil {
@@ -83,12 +121,24 @@ func login(ctx context.Context, options loginOptions, input io.Reader, output, p
 	if err := saveProtectedFile(options.registrationPath, contents); err != nil {
 		return fmt.Errorf("save accepted user registration: %w", err)
 	}
+	if authentication.Mode == authn.MethodOIDC {
+		if _, err := client.ExchangeSSHCertificate(
+			ctx, options.httpClient, options.apiURL, authentication, bearerToken, keyName, identity, signer,
+		); err != nil {
+			return fmt.Errorf("verify SSH certificate exchange: %w", err)
+		}
+	}
 	saved := profile.Profile{
-		ServerAddress: options.serverAddress,
-		Identity:      identity,
-		PrivateKey:    options.privateKeyPath,
-		KnownHosts:    options.knownHostsPath,
-		Insecure:      options.insecure,
+		ServerAddress:      options.serverAddress,
+		APIURL:             options.apiURL,
+		Namespace:          options.namespace,
+		Identity:           identity,
+		AuthenticationMode: authentication.Mode,
+		KeyName:            keyName,
+		OIDCDevice:         options.oidcDevice,
+		PrivateKey:         options.privateKeyPath,
+		KnownHosts:         options.knownHostsPath,
+		Insecure:           options.insecure,
 	}
 	if err := profile.Save(options.profilePath, saved); err != nil {
 		return fmt.Errorf("save login: %w", err)
@@ -173,7 +223,7 @@ func saveProtectedFile(path string, contents []byte) error {
 	return nil
 }
 
-func services(ctx context.Context, options servicesOptions, output io.Writer) error {
+func services(ctx context.Context, options servicesOptions, output, prompts io.Writer) error {
 	saved, err := profile.Load(options.profilePath)
 	if err != nil {
 		return fmt.Errorf("load login; run 'tearenv login' first: %w", err)
@@ -182,7 +232,7 @@ func services(ctx context.Context, options servicesOptions, output io.Writer) er
 	if err != nil {
 		return err
 	}
-	clientConfig, err := serviceClientConfig(saved, hostKey)
+	clientConfig, err := serviceClientConfig(ctx, saved, hostKey, options.httpClient, prompts, options.oidcDevice)
 	if err != nil {
 		return err
 	}
@@ -196,7 +246,7 @@ func services(ctx context.Context, options servicesOptions, output io.Writer) er
 	return nil
 }
 
-func connect(ctx context.Context, options connectOptions, specifications []string) error {
+func connect(ctx context.Context, options connectOptions, specifications []string, prompts io.Writer) error {
 	saved, err := profile.Load(options.profilePath)
 	if err != nil {
 		return fmt.Errorf("load login; run 'tearenv login' first: %w", err)
@@ -220,7 +270,7 @@ func connect(ctx context.Context, options connectOptions, specifications []strin
 	if err != nil {
 		return err
 	}
-	clientConfig, err := serviceClientConfig(saved, hostKey)
+	clientConfig, err := serviceClientConfig(ctx, saved, hostKey, options.httpClient, prompts, options.oidcDevice)
 	if err != nil {
 		return err
 	}
@@ -322,7 +372,14 @@ func defaultRegistrationPath() string {
 	return filepath.Join(directory, "tearenv", "user-registration.yaml")
 }
 
-func serviceClientConfig(saved *profile.Profile, hostKey ssh.HostKeyCallback) (client.ServiceClientConfig, error) {
+func serviceClientConfig(
+	ctx context.Context,
+	saved *profile.Profile,
+	hostKey ssh.HostKeyCallback,
+	httpClient *http.Client,
+	prompts io.Writer,
+	forceDevice bool,
+) (client.ServiceClientConfig, error) {
 	config := client.ServiceClientConfig{
 		ServerAddress: saved.ServerAddress,
 		Identity:      saved.Identity,
@@ -333,6 +390,30 @@ func serviceClientConfig(saved *profile.Profile, hostKey ssh.HostKeyCallback) (c
 		signer, err := client.LoadPrivateKey(saved.PrivateKey)
 		if err != nil {
 			return client.ServiceClientConfig{}, err
+		}
+		if saved.AuthenticationMode == authn.MethodOIDC {
+			authentication, err := client.DiscoverAuthentication(ctx, httpClient, saved.APIURL)
+			if err != nil {
+				return client.ServiceClientConfig{}, err
+			}
+			if authentication.Mode != authn.MethodOIDC || authentication.OIDC == nil {
+				return client.ServiceClientConfig{}, errors.New("server no longer advertises OIDC authentication")
+			}
+			oidcLogin, err := client.OIDCLogin(ctx, httpClient, *authentication.OIDC, client.OIDCLoginOptions{
+				Device: saved.OIDCDevice || forceDevice, Output: prompts,
+			})
+			if err != nil {
+				return client.ServiceClientConfig{}, err
+			}
+			if oidcLogin.Identity != saved.Identity {
+				return client.ServiceClientConfig{}, fmt.Errorf("OIDC identity %q does not match saved identity %q", oidcLogin.Identity, saved.Identity)
+			}
+			signer, err = client.ExchangeSSHCertificate(
+				ctx, httpClient, saved.APIURL, authentication, oidcLogin.SubjectToken, saved.KeyName, saved.Identity, signer,
+			)
+			if err != nil {
+				return client.ServiceClientConfig{}, err
+			}
 		}
 		config.Signer = signer
 	}

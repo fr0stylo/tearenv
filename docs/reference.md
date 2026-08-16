@@ -29,14 +29,16 @@ Creates or reuses an Ed25519 key, submits a `UserRegistration` to the resource A
 | `--config`                       | OS config directory plus `tearenv/config.json`              | Profile written after API acceptance.                      |
 | `--known-hosts`                  | `~/.ssh/known_hosts` when a home directory is available     | OpenSSH known-hosts file saved in the profile.             |
 | `--insecure-skip-host-key-check` | `false`                                                     | Disables gateway identity verification for development.    |
+| `--oidc-device`                  | `false`                                                     | Uses device authorization when the server advertises it.    |
 
 ### `tearenv services`
 
 Authenticates with the saved profile and prints `name<TAB>127.0.0.1:port` for each current grant.
 
-| Option     | Default                                        | Meaning                     |
-| ---------- | ---------------------------------------------- | --------------------------- |
-| `--config` | OS config directory plus `tearenv/config.json` | Profile created by `login`. |
+| Option          | Default                                        | Meaning                                                        |
+| --------------- | ---------------------------------------------- | -------------------------------------------------------------- |
+| `--config`      | OS config directory plus `tearenv/config.json` | Profile created by `login`.                                    |
+| `--oidc-device` | Saved value                                    | Uses device authorization for this OIDC command.                |
 
 ### `tearenv connect [name[=host:port] ...]`
 
@@ -51,6 +53,7 @@ Opens local TCP listeners for all granted services, or for the listed aliases. A
 | `--private-key`                  | Saved value                                    | Temporary SSH private-key override.                                                      |
 | `--known-hosts`                  | Saved value                                    | Temporary known-hosts override.                                                          |
 | `--insecure-skip-host-key-check` | Saved value                                    | Enables insecure verification for this run. It can't turn off an insecure saved profile. |
+| `--oidc-device`                  | Saved value                                    | Uses device authorization for this OIDC command.                                    |
 
 Requesting the same alias more than once is rejected. With no positional aliases, the client selects every grant in sorted order. With no grants, it exits instead of opening an empty tunnel.
 
@@ -97,7 +100,19 @@ Durations use Go syntax such as `500ms`, `30s`, `2m`, or `1h30m`. Negative timeo
 | `--users`                  | `.data/users.json`           | Identity-bound service policy file.                                      |
 | `--registrations`          | `.data/registrations`        | Durable `UserRegistration` directory.                                    |
 | `--registration-namespace` | `default`                    | Registration namespace used for SSH authentication.                      |
-| `--registration-token-file`| None                         | File containing the registration API bearer token; empty disables API authentication. |
+| `--registration-auth-mode` | Inferred                      | Exactly `token` or `oidc`; inferred from the mode-specific options when omitted.     |
+| `--registration-token-file`| None                          | Required in token mode.                                                              |
+| `--oidc-issuer-url`         | None                          | HTTPS issuer used for discovery and JWT verification.                                |
+| `--oidc-client-id`          | None                          | Public native-client ID advertised to clients.                                       |
+| `--oidc-audience`           | None                          | Required JWT and SSH token-exchange audience.                                        |
+| `--oidc-identity-claim`     | `preferred_username`          | ID/access-token claim mapped to the tearenv identity.                                 |
+| `--oidc-scopes`             | `openid,profile`              | Scopes requested by clients.                                                          |
+| `--oidc-subject-token-type` | `id-token`                    | Token exchanged by clients: `id-token` or RFC 9068 `access-token`.                     |
+| `--oidc-device-flow`        | `false`                       | Advertises device authorization support.                                              |
+| `--oidc-ca-file`            | None                          | Additional PEM CA certificates used for issuer discovery and JWKS.                    |
+| `--ssh-user-ca-key`         | None                          | Required CA private key in OIDC mode.                                                 |
+| `--ssh-certificate-ttl`     | `10m`                         | SSH user certificate lifetime; from 1 minute through 1 hour.                          |
+| `--ssh-certificate-clock-skew` | `30s`                      | Not-before allowance; from zero through 5 minutes.                                    |
 | `--blueprint`              | None                         | Team blueprint reconciled for every successfully authenticated identity. |
 | `--scaler`                 | None                         | Scaler backend. The included value is `kubernetes`.                      |
 | `--kubernetes`             | `false`                      | Deprecated alias for `--scaler kubernetes`.                              |
@@ -116,6 +131,23 @@ The client profile is JSON and must have mode `0600`; any group or world permiss
   "known_hosts": "/home/alice/.ssh/known_hosts"
 }
 ```
+
+An OIDC profile also records non-secret API and key metadata:
+
+```json
+{
+  "server": "gateway.example.com:2222",
+  "api_url": "https://tearenv-api.example.com",
+  "namespace": "default",
+  "identity": "alice",
+  "authentication_mode": "oidc",
+  "key_name": "alice-laptop",
+  "private_key": "/home/alice/.config/tearenv/id_ed25519",
+  "known_hosts": "/home/alice/.ssh/known_hosts"
+}
+```
+
+OIDC tokens and issued SSH certificates aren't profile fields and aren't saved.
 
 An insecure development profile additionally contains:
 

@@ -156,5 +156,7 @@ jobs:
           version="${RELEASE_TAG#v}"
           owner="${REPOSITORY_OWNER,,}"
           printf '%s' "$GITHUB_TOKEN" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+          helm repo add dex https://charts.dexidp.io
+          helm dependency build deploy/helm/tearenv
           helm package deploy/helm/tearenv --destination dist --version "$version" --app-version "$version"
           helm push "dist/tearenv-$version.tgz" "oci://ghcr.io/$owner/charts"

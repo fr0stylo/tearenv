@@ -7,7 +7,8 @@ Start with the guide that matches what you're doing:
 - [Understand why tearenv exists](overview.md) explains the problem, trust boundary, architecture, and connection lifecycle.
 - [Try tearenv locally](getting-started.md) walks through a complete local setup from build to first proxied request.
 - [Use tearenv as a developer](developer-guide.md) covers login, service discovery, local port selection, profiles, and day-to-day use.
-- [Choose an authentication method](authentication.md) covers invite tokens, Kubernetes-managed public keys, security constraints, and the OIDC extension point.
+- [Choose an authentication method](authentication.md) covers registration tokens, OIDC, short-lived SSH certificates, and their security boundaries.
+- [Deploy an OIDC provider](oidc-providers.md) covers bundled Dex plus existing Dex and Keycloak installations.
 - [Run tearenvd](operator-guide.md) covers identities, grants, static services, Kubernetes scaling, storage, and operations.
 - [Define reusable team environments](environment-blueprints.md) covers the blueprint schema, per-identity provisioning, namespace isolation, service declarations, and RBAC.
 - [Deploy on Kubernetes](kubernetes-deployment.md) covers the container image, Helm chart, Kustomize overlays, persistence, and scaler RBAC.
@@ -15,6 +16,7 @@ Start with the guide that matches what you're doing:
 - [Diagnose a problem](troubleshooting.md) maps common errors and symptoms to checks and fixes.
 - [Review the security model](security.md) explains what tearenv permits, what it blocks, and how to deploy it safely.
 - [Develop and test tearenv](development.md) covers the repository layout and test suites.
+- [Review the developer flow](developer-flow-review.md) records prioritized onboarding, connection recovery, authentication, and credential lifecycle improvements.
 
 ## Know the two programs
 

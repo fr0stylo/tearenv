@@ -12,7 +12,8 @@ The gateway is a privileged policy enforcement point. It can reach every configu
 
 The SSH server enables only the application protocol needed by tearenv:
 
-- Public-key authentication proves possession of an identity-bound private key.
+- In token mode, public-key authentication proves possession of an identity-bound private key.
+- In OIDC mode, a CA-signed certificate proves a recent OIDC login plus possession of the registered private key.
 - Catalog requests return aliases and suggested local ports.
 - Direct TCP channels accept a granted alias with port zero.
 
@@ -30,11 +31,18 @@ Plan host-key rotation like any SSH infrastructure change: publish the new finge
 
 ## Protect registration state and private keys
 
-The current API accepts valid registrations by default. The first writer at a resource path establishes its immutable identity and public-key spec. This is simple and stateful, but it is not identity verification: an untrusted caller could register a key for an identity before its intended owner.
+The API accepts valid registrations by default. In token mode, the first writer at a resource path establishes its immutable identity and public-key spec. This is simple and stateful, but the shared token isn't identity verification: a token holder could register a key for an identity before its intended owner.
 
 The default API listener is loopback-only. The Kubernetes packages configure bearer-token authentication with `--registration-token-file`. When remote registration is required, expose it only through a trusted TLS reverse proxy or Ingress and protect the token through your secret-management system.
 
-The shared enrollment token proves permission to register, but it doesn't bind a caller to a particular identity. A token holder could claim any unclaimed identity, including one with existing grants. Use a private onboarding channel, rotate a disclosed token, and don't treat this baseline as untrusted multi-tenant identity federation.
+OIDC mode binds the resource to the verified issuer and subject and requires the configured identity claim to equal `spec.identity`. It validates signed ID tokens against the public client ID by default. Optional access-token mode accepts only RFC 9068 JWT access tokens for the configured audience. Treat identity-provider configuration, claim uniqueness, client redirect URIs, signing keys, and group or account lifecycle as part of the security boundary.
+
+The SSH user CA can mint access for every identity. Store it separately from the
+SSH host key, mount it read-only, and restrict backup and secret-manager access.
+Certificates are short-lived, kept in client memory, and terminate their SSH
+connection at expiry. Revoking a user at the identity provider prevents new
+certificates but doesn't shorten a certificate already issued; choose the TTL to
+match that exposure.
 
 The private key stays in the developer's owner-only local file. Anyone who obtains it can authenticate as that identity. The server-side registration documents contain public keys, but write access is security-sensitive because it controls authentication. Keep the store on protected persistent storage and out of source control.
 

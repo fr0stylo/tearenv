@@ -11,18 +11,20 @@ import (
 const defaultAPIURL = "http://127.0.0.1:8080"
 
 type loginOptions struct {
-	serverAddress         string
-	apiURL                string
-	namespace             string
-	identity              string
-	identityDefault       string
-	privateKeyPath        string
-	registrationPath      string
-	registrationTokenPath string
-	profilePath           string
-	knownHostsPath        string
-	insecure              bool
-	httpClient            *http.Client
+	serverAddress          string
+	apiURL                 string
+	namespace              string
+	identity               string
+	identityDefault        string
+	privateKeyPath         string
+	registrationPath       string
+	registrationTokenPath  string
+	profilePath            string
+	knownHostsPath         string
+	insecure               bool
+	oidcDevice             bool
+	discoverAuthentication bool
+	httpClient             *http.Client
 }
 
 type connectOptions struct {
@@ -33,10 +35,14 @@ type connectOptions struct {
 	privateKeyPath string
 	knownHostsPath string
 	insecure       bool
+	oidcDevice     bool
+	httpClient     *http.Client
 }
 
 type servicesOptions struct {
 	profilePath string
+	oidcDevice  bool
+	httpClient  *http.Client
 }
 
 func run(arguments []string) error {
@@ -62,15 +68,16 @@ func newRootCommand() *cobra.Command {
 
 func newLoginCommand() *cobra.Command {
 	options := loginOptions{
-		serverAddress:    client.DefaultServerAddress,
-		apiURL:           defaultAPIURL,
-		namespace:        "default",
-		identityDefault:  defaultIdentity(),
-		profilePath:      defaultProfilePath(),
-		knownHostsPath:   defaultKnownHostsPath(),
-		privateKeyPath:   defaultPrivateKeyPath(),
-		registrationPath: defaultRegistrationPath(),
-		httpClient:       &http.Client{Timeout: 15 * time.Second},
+		serverAddress:          client.DefaultServerAddress,
+		apiURL:                 defaultAPIURL,
+		namespace:              "default",
+		identityDefault:        defaultIdentity(),
+		profilePath:            defaultProfilePath(),
+		knownHostsPath:         defaultKnownHostsPath(),
+		privateKeyPath:         defaultPrivateKeyPath(),
+		registrationPath:       defaultRegistrationPath(),
+		discoverAuthentication: true,
+		httpClient:             &http.Client{Timeout: 15 * time.Second},
 	}
 	command := &cobra.Command{
 		Use:   "login",
@@ -91,20 +98,22 @@ func newLoginCommand() *cobra.Command {
 	flags.StringVar(&options.profilePath, "config", options.profilePath, "local profile destination")
 	flags.StringVar(&options.knownHostsPath, "known-hosts", options.knownHostsPath, "SSH known_hosts file")
 	flags.BoolVar(&options.insecure, "insecure-skip-host-key-check", false, "disable host identity verification (development only)")
+	flags.BoolVar(&options.oidcDevice, "oidc-device", false, "use OIDC device authorization instead of opening a browser")
 	return command
 }
 
 func newServicesCommand() *cobra.Command {
-	options := servicesOptions{profilePath: defaultProfilePath()}
+	options := servicesOptions{profilePath: defaultProfilePath(), httpClient: &http.Client{Timeout: 15 * time.Second}}
 	command := &cobra.Command{
 		Use:   "services",
 		Short: "List services granted to the saved identity",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
-			return services(command.Context(), options, command.OutOrStdout())
+			return services(command.Context(), options, command.OutOrStdout(), command.ErrOrStderr())
 		},
 	}
 	command.Flags().StringVar(&options.profilePath, "config", options.profilePath, "local profile created by tearenv login")
+	command.Flags().BoolVar(&options.oidcDevice, "oidc-device", false, "use OIDC device authorization instead of opening a browser")
 	return command
 }
 
@@ -112,13 +121,14 @@ func newConnectCommand() *cobra.Command {
 	options := connectOptions{
 		profilePath: defaultProfilePath(),
 		listenHost:  "127.0.0.1",
+		httpClient:  &http.Client{Timeout: 15 * time.Second},
 	}
 	command := &cobra.Command{
 		Use:   "connect [service[=host:port] ...]",
 		Short: "Expose granted services on local TCP listeners",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(command *cobra.Command, specifications []string) error {
-			return connect(command.Context(), options, specifications)
+			return connect(command.Context(), options, specifications, command.ErrOrStderr())
 		},
 	}
 	flags := command.Flags()
@@ -129,5 +139,6 @@ func newConnectCommand() *cobra.Command {
 	flags.StringVar(&options.privateKeyPath, "private-key", "", "override the saved SSH private key")
 	flags.StringVar(&options.knownHostsPath, "known-hosts", "", "override the saved known_hosts file")
 	flags.BoolVar(&options.insecure, "insecure-skip-host-key-check", false, "disable host identity verification (development only)")
+	flags.BoolVar(&options.oidcDevice, "oidc-device", false, "use OIDC device authorization instead of opening a browser")
 	return command
 }

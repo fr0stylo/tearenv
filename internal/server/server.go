@@ -54,10 +54,10 @@ func New(config Config) (*Server, error) {
 		config.Gateway = NewLifecycleGateway(config.Policy, nil, config.Logger, WithMetrics(config.Metrics))
 	}
 	requestHandlers := map[string]gliderssh.RequestHandler{
-		protocol.ServicesRequestType: serviceCatalogHandler(config.Gateway, config.Logger, config.Metrics),
+		protocol.ServicesRequestType: expiringRequestHandler(serviceCatalogHandler(config.Gateway, config.Logger, config.Metrics)),
 	}
 	if config.Enrollment != nil {
-		requestHandlers[protocol.EnrollRequestType] = enrollmentHandler(config.Enrollment, config.Logger)
+		requestHandlers[protocol.EnrollRequestType] = expiringRequestHandler(enrollmentHandler(config.Enrollment, config.Logger))
 	}
 	provisionEnvironment := func(ctx gliderssh.Context, identity string, method authorization.Method) bool {
 		if config.Provisioner == nil {
@@ -90,6 +90,9 @@ func New(config Config) (*Server, error) {
 		}
 		if !provisionEnvironment(ctx, result.Identity, attempt.Method) {
 			return false
+		}
+		if !result.ValidBefore.IsZero() {
+			ctx.SetValue(authenticationExpiryContextKey{}, &authenticationExpiry{validBefore: result.ValidBefore})
 		}
 		config.Metrics.observeAuthentication(attempt.Method, metricResultSuccess)
 		config.Logger.Info("client authenticated",
@@ -133,7 +136,7 @@ func New(config Config) (*Server, error) {
 			})
 		},
 		ChannelHandlers: map[string]gliderssh.ChannelHandler{
-			"direct-tcpip": serviceChannelHandler(config.Gateway, config.Logger),
+			"direct-tcpip": expiringChannelHandler(serviceChannelHandler(config.Gateway, config.Logger)),
 		},
 		RequestHandlers: requestHandlers,
 		ConnectionFailedCallback: func(connection net.Conn, err error) {

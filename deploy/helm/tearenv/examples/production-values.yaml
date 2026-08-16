@@ -7,6 +7,7 @@ bootstrap:
   existingSecret: tearenv-bootstrap
 
 registration:
+  authMode: token
   token:
     existingSecret: tearenv-registration
   # Keep registration cluster-local unless permanent self-service is required.

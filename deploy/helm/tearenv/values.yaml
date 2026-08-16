@@ -23,10 +23,38 @@ service:
 registration:
   namespace: default
   port: 8080
+  # Exactly one authentication mode is active: token or oidc.
+  authMode: token
   token:
     # Leave empty for Helm to generate and preserve a token. Set this for GitOps.
     existingSecret: ""
     secretKey: token
+  oidc:
+    # external uses an existing OIDC issuer. bundledDex deploys the optional
+    # Dex chart below and derives the issuer from dex.config.issuer.
+    provider: external
+    issuerURL: ""
+    clientID: tearenv-cli
+    audience: tearenv
+    identityClaim: preferred_username
+    # ID tokens work with Dex, Keycloak, and most interactive OIDC providers.
+    # Use access-token only when the issuer provides RFC 9068 at+jwt tokens.
+    subjectTokenType: id-token
+    scopes:
+      - openid
+      - profile
+    deviceFlow: false
+    ca:
+      # Optional CA bundle for a privately signed issuer certificate.
+      existingSecret: ""
+      secretKey: ca.crt
+    sshUserCA:
+      # Required in OIDC mode. The Secret key must contain an unencrypted
+      # OpenSSH or PEM private key used only to sign short-lived user certs.
+      existingSecret: ""
+      secretKey: ca_key
+      certificateTTL: 10m
+      clockSkew: 30s
   ingress:
     enabled: false
     className: ""
@@ -114,3 +142,51 @@ terminationGracePeriodSeconds: 45
 nodeSelector: {}
 tolerations: []
 affinity: {}
+
+# Optional official Dex subchart. Set registration.authMode=oidc,
+# registration.oidc.provider=bundledDex, and dex.enabled=true together.
+dex:
+  enabled: false
+  replicaCount: 2
+  config:
+    issuer: ""
+    storage:
+      type: kubernetes
+      config:
+        inCluster: true
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      skipApprovalScreen: true
+    staticClients:
+      - id: tearenv-cli
+        name: Tearenv CLI
+        public: true
+    # Add GitHub, Google, LDAP, or another connector before enabling Dex.
+    connectors: []
+  envFrom: []
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts: []
+    tls: []
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1

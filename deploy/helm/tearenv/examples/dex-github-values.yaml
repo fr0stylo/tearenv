@@ -1,0 +1,64 @@
+# Create tearenv-ssh-user-ca and tearenv-dex-github before installing.
+registration:
+  authMode: oidc
+  oidc:
+    provider: bundledDex
+    clientID: tearenv-cli
+    audience: tearenv
+    subjectTokenType: id-token
+    sshUserCA:
+      existingSecret: tearenv-ssh-user-ca
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    host: tearenv-api.example.com
+    tls:
+      enabled: true
+      secretName: tearenv-api-tls
+
+dex:
+  enabled: true
+  config:
+    issuer: https://auth.example.com
+    storage:
+      type: kubernetes
+      config:
+        inCluster: true
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      skipApprovalScreen: true
+    staticClients:
+      - id: tearenv-cli
+        name: Tearenv CLI
+        public: true
+    connectors:
+      - type: github
+        id: github
+        name: GitHub
+        config:
+          clientID: $GITHUB_CLIENT_ID
+          clientSecret: $GITHUB_CLIENT_SECRET
+          redirectURI: https://auth.example.com/callback
+  envFrom:
+    - secretRef:
+        name: tearenv-dex-github
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: auth.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: tearenv-dex-tls
+        hosts:
+          - auth.example.com
+
+service:
+  type: LoadBalancer

@@ -16,6 +16,7 @@ import (
 
 	"github.com/fr0stylo/tearenv/internal/authorization"
 	"github.com/fr0stylo/tearenv/internal/client"
+	"github.com/fr0stylo/tearenv/internal/protocol"
 	"github.com/fr0stylo/tearenv/internal/server"
 	"golang.org/x/crypto/ssh"
 )
@@ -154,6 +155,79 @@ func TestPublicKeyIdentityListsAuthorizedServices(t *testing.T) {
 	if len(catalog) != 1 || catalog[0].Name != "redis" {
 		t.Fatalf("catalog = %#v, want redis", catalog)
 	}
+}
+
+func TestOIDCCertificateAuthenticatesAndExpiresConnection(t *testing.T) {
+	policyPath := filepath.Join(t.TempDir(), "access.json")
+	if err := authorization.GrantService(policyPath, "alice", authorization.Service{
+		Name: "redis", Target: "redis.dev.svc:6379", LocalPort: 6379,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := authorization.LoadCredentials(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caSigner := newSigner(t)
+	authenticator, err := authorization.NewCertificateAuthority(caSigner.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostSigner := newSigner(t)
+	gateway, err := server.New(server.Config{
+		Authenticator: authenticator,
+		Policy:        policy,
+		Signer:        hostSigner,
+		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = gateway.Serve(ctx, listener) }()
+
+	userSigner := newSigner(t)
+	certificate := &ssh.Certificate{
+		Key:             userSigner.PublicKey(),
+		CertType:        ssh.UserCert,
+		ValidPrincipals: []string{"alice"},
+		ValidAfter:      uint64(time.Now().Add(-time.Minute).Unix()),
+		ValidBefore:     uint64(time.Now().Add(2 * time.Second).Unix()),
+		Permissions: ssh.Permissions{Extensions: map[string]string{
+			"tearenv.io/authentication": "oidc",
+		}},
+	}
+	if err := certificate.SignCert(rand.Reader, caSigner); err != nil {
+		t.Fatal(err)
+	}
+	certificateSigner, err := ssh.NewCertSigner(certificate, userSigner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := ssh.Dial("tcp", listener.Addr().String(), &ssh.ClientConfig{
+		User: "alice", Auth: []ssh.AuthMethod{ssh.PublicKeys(certificateSigner)},
+		HostKeyCallback: ssh.FixedHostKey(hostSigner.PublicKey()), Timeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if ok, _, err := connection.SendRequest(protocol.ServicesRequestType, true, nil); err != nil || !ok {
+		t.Fatalf("initial catalog request failed: ok=%v err=%v", ok, err)
+	}
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, _, err := connection.SendRequest(protocol.ServicesRequestType, true, nil); err != nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("SSH connection remained usable after certificate expiry")
 }
 
 func TestSuccessfulAuthenticationProvisionsIdentityEnvironment(t *testing.T) {

@@ -75,6 +75,74 @@ The startup log reports the bound SSH, API, and metrics addresses, state paths, 
 
 The API requires the configured bearer token, automatically accepts the first valid resource at a path, and stores it as protected YAML. Repeating the same registration is idempotent; changing its spec returns `409 Conflict`. The unauthenticated `/healthz` and `/readyz` paths are available for probes. Follow [the authentication guide](authentication.md) for the client command and trust boundary.
 
+## Use OIDC and short-lived SSH certificates
+
+Register tearenv as a public native application in your identity provider. Allow
+the authorization-code flow, PKCE with `S256`, and loopback HTTP redirect URIs.
+The client listens on an ephemeral `127.0.0.1` port, as described by the native
+application OAuth profile. Enable device authorization in the provider only if
+you also set `--oidc-device-flow` on tearenvd.
+
+ID-token exchange is the default and works with Dex, Keycloak, and most OIDC
+providers. The ID token must be issued to `--oidc-client-id`. Use
+`--oidc-subject-token-type access-token` only when the provider issues RFC 9068
+JWT access tokens for `--oidc-audience` with `typ=at+jwt`. The selected token
+must contain the identity claim. The default is `preferred_username`; the claim
+must be stable, unique, and fit tearenv's identity format. The OIDC client ID is
+public and isn't a client secret.
+
+Create a dedicated SSH user CA:
+
+```sh
+install -d -m 0700 /etc/tearenv
+ssh-keygen -t ed25519 -N '' -C tearenv-user-ca \
+  -f /etc/tearenv/ssh_user_ca
+chmod 0600 /etc/tearenv/ssh_user_ca
+```
+
+Start the gateway in OIDC mode:
+
+```sh
+tearenvd serve \
+  --listen :2222 \
+  --api-listen :8080 \
+  --registration-auth-mode oidc \
+  --oidc-issuer-url https://id.example.com \
+  --oidc-client-id tearenv-cli \
+  --oidc-audience tearenv \
+  --oidc-identity-claim preferred_username \
+  --oidc-scopes openid,profile \
+  --oidc-subject-token-type id-token \
+  --ssh-user-ca-key /etc/tearenv/ssh_user_ca \
+  --ssh-certificate-ttl 10m \
+  --ssh-certificate-clock-skew 30s \
+  --users /var/lib/tearenv/users.json \
+  --registrations /var/lib/tearenv/registrations \
+  --host-key /var/lib/tearenv/ssh_host_ed25519_key
+```
+
+Startup performs OIDC discovery and fails closed if discovery or required
+configuration is invalid. OIDC and `--registration-token-file` can't be enabled
+together. Keep the CA private key in a secret manager, mount it read-only, and
+limit access to the gateway workload. The CA public key isn't secret.
+
+For an issuer signed by a private CA, mount the public CA bundle and pass
+`--oidc-ca-file /etc/tearenv/issuer-ca.pem`. Client machines must trust the same
+CA through their operating-system trust store. Use
+[the OIDC provider deployment guide](oidc-providers.md) for bundled Dex and
+external Keycloak configuration.
+
+To rotate the CA, plan a short maintenance window: replace the mounted key and
+restart the single gateway replica. Certificates from the old CA stop working
+immediately; clients obtain certificates from the new CA on their next command.
+Keep the previous key available for rollback until the deployment is verified.
+
+To migrate from token mode, retain the registration volume, configure OIDC, and
+restart. A user's first OIDC login adopts an existing registration only when the
+identity and public-key spec match exactly. Test with a non-privileged identity
+before migrating the rest of the team. Roll back by restoring token mode and its
+Secret; the OIDC owner status is harmless to token-mode public-key SSH auth.
+
 The process handles `SIGINT` and `SIGTERM`. On shutdown it closes the SSH listener and attempts to scale down workloads started by that process, allowing up to 30 seconds for each scaler call.
 
 ## Scrape Prometheus metrics

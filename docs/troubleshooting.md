@@ -12,6 +12,30 @@ A `401 Unauthorized` response means the gateway requires an enrollment token. Pa
 
 A `409 Conflict` means a resource already exists at the same namespace and name with a different identity or key. Reuse the original private key, choose another identity/resource name, or have an operator deliberately remove the stored registration while the gateway is stopped.
 
+An OIDC `403 Forbidden` means the registration belongs to another verified
+issuer or subject. Don't delete it until an operator has confirmed whether this
+is an account migration, a reused identity claim, or an attempted takeover.
+
+### Browser or device login fails
+
+Fetch `/.well-known/tearenv-configuration` through the exact `--api-url` and
+confirm the issuer, client ID, audience, scopes, and device-flow setting. At the
+identity provider, verify that the client is public, authorization code and PKCE
+`S256` are enabled, and loopback HTTP redirects with ephemeral ports are allowed.
+
+If the browser can't open, copy the printed URL into a browser on the same
+machine. For headless environments, the operator must enable device flow and the
+provider must advertise a device authorization endpoint before `--oidc-device`
+can work.
+
+An `invalid_grant` token-exchange response usually means the JWT has the wrong
+issuer, audience, subject, identity claim, or configured token type. In default
+ID-token mode, confirm the audience is the public OIDC client ID. In
+access-token mode, confirm the provider issues RFC 9068 tokens with
+`typ=at+jwt`. An `invalid_target` response points to the SSH
+audience or registration owner. An `invalid_request` response can mean the saved
+key name no longer exists in the accepted registration.
+
 ### Host key verification fails
 
 Confirm that the profile's host and port match the known-hosts entry:
@@ -56,7 +80,7 @@ If a mounted filesystem can't enforce Unix modes, place the profile on a filesys
 
 ### `unable to authenticate` or `client authentication rejected`
 
-Check that the profile identity matches `spec.identity`, the profile's `private_key` exists with mode `0600`, and the API namespace matches `tearenvd --registration-namespace`. The gateway logs `provider=user-registration` after a successful key login.
+Check that the profile identity matches `spec.identity`, the profile's `private_key` exists with mode `0600`, and the API namespace matches `tearenvd --registration-namespace`. The gateway logs `provider=user-registration` in token mode or `provider=oidc-ssh-certificate` in OIDC mode after a successful login.
 
 Compare the local public key with the persisted resource:
 
@@ -136,6 +160,14 @@ ss -ltnp | grep ':2222'
 ```
 
 Stop the other listener or change `--listen`. Developers must use the same published address and known-hosts entry.
+
+### OIDC discovery fails at startup
+
+tearenvd fails closed when the issuer metadata or JWKS can't be loaded. Confirm
+the issuer is an HTTPS URL, DNS and CA trust work inside the pod, and the issuer's
+discovery document reports its exact configured issuer. Also confirm the client
+ID, audience, and CA Secret are present. OIDC options and
+`--registration-token-file` are intentionally mutually exclusive.
 
 ### Kubernetes scaler configuration fails outside a pod
 

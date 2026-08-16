@@ -1,0 +1,33 @@
+# Create a public Keycloak client named tearenv-cli with standard flow and
+# PKCE S256 enabled. Allow http://127.0.0.1 as the native-client redirect URI;
+# Keycloak treats that exact URI as allowing a random loopback port.
+registration:
+  authMode: oidc
+  oidc:
+    provider: external
+    issuerURL: https://keycloak.example.com/realms/developers
+    clientID: tearenv-cli
+    audience: tearenv
+    identityClaim: preferred_username
+    subjectTokenType: id-token
+    scopes:
+      - openid
+      - profile
+      - email
+    sshUserCA:
+      existingSecret: tearenv-ssh-user-ca
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    host: tearenv-api.example.com
+    tls:
+      enabled: true
+      secretName: tearenv-api-tls
+
+dex:
+  enabled: false
+
+service:
+  type: LoadBalancer

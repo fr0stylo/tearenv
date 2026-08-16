@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -28,8 +29,9 @@ type Attempt struct {
 
 // Result describes the verified identity and provider.
 type Result struct {
-	Identity string
-	Provider string
+	Identity    string
+	Provider    string
+	ValidBefore time.Time
 }
 
 // Authenticator verifies an authentication attempt. Providers return false

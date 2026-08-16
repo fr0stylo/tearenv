@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tearenvd
+spec:
+  template:
+    spec:
+      containers:
+        - name: tearenvd
+          args:
+            - serve
+            - --listen=:2222
+            - --metrics-listen=:9090
+            - --users=/var/lib/tearenv/users.json
+            - --host-key=/var/lib/tearenv/ssh_host_ed25519_key
+            - --api-listen=:8080
+            - --registrations=/var/lib/tearenv/registrations
+            - --registration-namespace=default
+            - --registration-auth-mode=oidc
+            - --oidc-issuer-url=https://id.example.com
+            - --oidc-client-id=tearenv-cli
+            - --oidc-audience=tearenv
+            - --oidc-identity-claim=preferred_username
+            - --oidc-scopes=openid,profile
+            - --oidc-subject-token-type=id-token
+            - --ssh-user-ca-key=/etc/tearenv/ssh-user-ca/ca_key
+            - --ssh-certificate-ttl=10m
+            - --ssh-certificate-clock-skew=30s
+            - --scaler=kubernetes
+          volumeMounts:
+            - name: registration-auth
+              $patch: delete
+            - name: ssh-user-ca
+              mountPath: /etc/tearenv/ssh-user-ca
+              readOnly: true
+      volumes:
+        - name: registration-auth
+          $patch: delete
+        - name: ssh-user-ca
+          secret:
+            secretName: tearenvd-ssh-user-ca
+            defaultMode: 0440
+            items:
+              - key: ca_key
+                path: ca_key
